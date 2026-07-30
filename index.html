@@ -55,6 +55,8 @@ h1 span{color:var(--mute);font-weight:500;font-size:.62em;letter-spacing:0;margi
 .btn:hover{color:var(--ink);border-color:#3E5266}
 .btn.warn:hover{color:#FF9B9B;border-color:#6A3235}
 .spacer{flex:1}
+.syncst{font-size:11px;color:var(--faint);white-space:nowrap}
+.syncst.on{color:#7BE3B0}
 :focus-visible{outline:2px solid var(--pick);outline-offset:2px}
 
 .grid{display:grid;grid-template-columns:minmax(0,1.28fr) minmax(0,1fr);gap:15px;align-items:start}
@@ -362,7 +364,7 @@ function render(){
   +'<div class="bar"><div class="seg" id="flt">'
   +'<button data-f="all" aria-pressed="'+(v.flt==='all')+'">전체</button>'
   +v.floors.map(f=>'<button data-f="'+f[0]+'" aria-pressed="'+(v.flt===f[0])+'">'+f[1]+'</button>').join('')
-  +'</div><div class="spacer"></div>'
+  +'</div><div class="spacer"></div><span class="syncst" id="syncst">저장 상태 확인 중…</span>'
   +'<button class="btn" id="save">저장</button>'
   +'<button class="btn" id="load">불러오기</button>'
   +'<input type="file" id="lf" accept=".json,application/json" style="display:none">'
@@ -479,7 +481,7 @@ function bindGrid(){
   });
   const end=()=>{if(!painting)return;
     if(!moved&&origin) applySeat(origin,null);
-    painting=false;origin=null; commitLog();
+    painting=false;origin=null; commitLog(); schedulePersist();
     if(dirty){const v=VEN[CUR],z=v.zones.find(x=>x.id===v.sel);
       stats();drawPlan();const dm=document.getElementById('dm');if(dm)dm.innerHTML=dmHTML(zStat(v,z));}};
   sg.addEventListener('pointerup',end); sg.addEventListener('pointercancel',end);
@@ -692,10 +694,10 @@ document.getElementById('app').addEventListener('click',e=>{
       else{const w=(m==='1'); if(w===(s.b==='x')) v.ov.delete(KEY(z,s)); else v.ov.set(KEY(z,s),w);}
       if(!before&&held(v,z,s)) G.add.push(rowLabel(v,z,s)+' '+s.n+'번');
     });
-    commitLog();
+    commitLog(); schedulePersist();
     stats(); drawPlan();
     document.getElementById('detail').innerHTML=detailHTML(v,z); bindGrid(); return; }
-  if(e.target.closest('#rall')){ v.ov.clear(); stats(); drawPlan();
+  if(e.target.closest('#rall')){ v.ov.clear(); schedulePersist(); stats(); drawPlan();
     if(v.sel){const z=v.zones.find(x=>x.id===v.sel);
       document.getElementById('detail').innerHTML=detailHTML(v,z);bindGrid();} return; }
   const flash=(el,msg)=>{const o=el.textContent;el.textContent=msg;setTimeout(()=>{el.textContent=o;},1600);};
@@ -705,20 +707,21 @@ document.getElementById('app').addEventListener('click',e=>{
 });
 document.getElementById('app').addEventListener('change',e=>{
   const mn=e.target.closest('.mnote');
-  if(mn){ VEN[CUR].log[+mn.dataset.mi].note=mn.value; return; }
+  if(mn){ VEN[CUR].log[+mn.dataset.mi].note=mn.value; schedulePersist(); return; }
   const ck=e.target.closest('[data-ck]');
   if(ck){ const v=VEN[ck.dataset.ck], i=+ck.dataset.ci;
     if(ck.checked)v.done.add(i); else v.done.delete(i);
     ck.closest('.ci').classList.toggle('done',ck.checked);
     let t=0,dn=0; KEYS.forEach(k=>{t+=VEN[k].checks.length;dn+=VEN[k].done.size;});
     document.getElementById('chkcnt').textContent=dn+' / '+t+' 확인 완료';
+    schedulePersist();
     return; }
   if(e.target.id!=='lf')return;
   const f=e.target.files&&e.target.files[0]; if(!f)return;
   loadState(f,(err)=>{
     const b=document.getElementById('load');
     if(err){ b.textContent='불러오기 실패'; setTimeout(()=>{b.textContent='불러오기';},2200); }
-    else { render(); const nb=document.getElementById('load');
+    else { render(); schedulePersist(); const nb=document.getElementById('load');
       nb.textContent='불러왔습니다'; setTimeout(()=>{nb.textContent='불러오기';},1600); }
   });
   e.target.value='';
@@ -781,7 +784,58 @@ addEventListener('resize',()=>{const v=VEN[CUR];
   },{passive:false});
   app.addEventListener('dblclick',e=>{ if(e.target.closest('.plan')) stepZoom(1); });
 })();
+/* ── 자동 저장 · 공유 저장소 동기화 ── */
+const LSKEY='volleyball-seatmap-v1';
+function packState(){const o={ver:1,updatedAt:Date.now(),venues:{}};
+  KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log};});
+  return o;}
+function applyState(o){ if(!o||!o.venues)return false;
+  KEYS.forEach(k=>{const x=o.venues[k]||{};
+    VEN[k].ov=new Map(x.ov||[]); VEN[k].done=new Set(x.done||[]);
+    VEN[k].log=(x.log||[]).map(e=>({t:e.t,zid:e.zid,seats:e.seats||e.add||[],note:e.note||''}));});
+  return true;}
+let shared=false,lastLocal=0,lastSeen=0,pushTimer=null,pushing=false;
+function syncBadge(txt,ok){const el=document.getElementById('syncst');
+  if(el){el.textContent=txt;el.className='syncst'+(ok?' on':'');}}
+function schedulePersist(){ lastLocal=Date.now();
+  try{localStorage.setItem(LSKEY,JSON.stringify(packState()));}catch(e){}
+  if(!shared){syncBadge('이 기기 브라우저에 자동 저장됨',false);return;}
+  clearTimeout(pushTimer); pushTimer=setTimeout(pushState,1200);
+  syncBadge('공유 저장 중…',true);}
+async function pushState(){ if(pushing){pushTimer=setTimeout(pushState,800);return;}
+  pushing=true;
+  try{const o=packState();
+    const r=await fetch('api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});
+    if(r.ok){lastSeen=o.updatedAt;const d=new Date();
+      syncBadge('공유 저장소에 저장됨 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),true);}
+    else syncBadge('공유 저장 실패 — 이 기기에만 저장됨',false);
+  }catch(e){syncBadge('공유 저장 실패 — 이 기기에만 저장됨',false);}
+  pushing=false;}
+async function pullState(first){
+  try{const r=await fetch('api/state',{cache:'no-store'}); if(!r.ok)throw 0;
+    const o=await r.json();
+    shared=true;
+    if(o&&o.venues){
+      if(first||(o.updatedAt!==lastSeen&&!painting&&Date.now()-lastLocal>10000)){
+        applyState(o); lastSeen=o.updatedAt||0; render();
+      }
+      if(first)syncBadge('공유 저장소 연결됨 — 모두 같은 현황을 봅니다',true);
+    }else{
+      /* 서버가 비어 있으면 이 기기 저장분으로 시드 */
+      try{const raw=localStorage.getItem(LSKEY);
+        if(raw&&applyState(JSON.parse(raw))){render();schedulePersist();}
+        else syncBadge('공유 저장소 연결됨(빈 상태)',true);
+      }catch(x){syncBadge('공유 저장소 연결됨(빈 상태)',true);}
+    }
+  }catch(e){ if(first){shared=false;
+    try{const raw=localStorage.getItem(LSKEY);
+      if(raw&&applyState(JSON.parse(raw)))render();}catch(x){}
+    syncBadge('이 기기 브라우저에 자동 저장됨',false);}}
+}
+window.arenaSync={pull:pullState,push:pushState};
 tabs(); render();
+pullState(true);
+setInterval(()=>{if(shared&&!document.hidden)pullState(false);},15000);
 })();
 </script>
 </body>
