@@ -115,12 +115,22 @@ h1 span{color:var(--mute);font-weight:500;font-size:.62em;letter-spacing:0;margi
   border:1px solid #2E4356;background:#111A22;border-radius:7px;padding:6px 10px;white-space:nowrap}
 .vp-links .ext:hover{color:#BFE0FA;border-color:#3E5266}
 .chk-body{padding:13px 16px 15px}
-.vpgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:9px;margin-bottom:11px}
+.vpgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-bottom:13px}
+@media(max-width:640px){.vpgrid{grid-template-columns:1fr}}
 .vpc{position:relative;margin:0}
-.vpc img{display:block;width:100%;height:132px;object-fit:cover;border-radius:9px;border:1px solid var(--line)}
-.vpx{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:6px;border:1px solid #4A3237;
-  background:rgba(10,12,15,.82);color:#FF9B9B;font-size:14px;line-height:1;cursor:pointer;padding:0}
+.vpc img{display:block;width:100%;height:auto;max-height:420px;object-fit:contain;background:#0A0E12;
+  border-radius:10px;border:1px solid var(--line);cursor:zoom-in}
+.vpc img:hover{border-color:#3E5266}
+.vpx{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:7px;border:1px solid #4A3237;
+  background:rgba(10,12,15,.85);color:#FF9B9B;font-size:15px;line-height:1;cursor:pointer;padding:0}
 .vpx:hover{background:#2A1418}
+#lb{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;
+  background:rgba(6,9,12,.94);padding:26px;cursor:zoom-out}
+#lb.on{display:flex}
+#lb img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px;box-shadow:0 24px 70px rgba(0,0,0,.7)}
+#lb .lbx{position:absolute;top:16px;right:20px;background:transparent;border:0;color:#EAF0F6;
+  font-size:30px;line-height:1;cursor:pointer;padding:4px 10px}
+#lb .lbn{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:11.5px;color:#8DA0B2}
 .vpempty{font-size:12px;color:var(--faint);line-height:1.7;margin-bottom:11px}
 .vpadd{display:flex;gap:7px;flex-wrap:wrap}
 .vpurl{flex:1 1 240px;min-width:0;background:#0C1116;border:1px solid var(--line);border-radius:8px;
@@ -369,8 +379,8 @@ function venuePhotoHTML(){
    +'</div></div><div class="chk-body">';
   if(ps.length){
     h+='<div class="vpgrid">';
-    ps.forEach((u,i)=>{ h+='<figure class="vpc"><a href="'+u+'" target="_blank" rel="noopener noreferrer">'
-      +'<img src="'+u+'" alt="'+v.name+' 사진 '+(i+1)+'" loading="lazy"></a>'
+    ps.forEach((u,i)=>{ h+='<figure class="vpc">'
+      +'<img src="'+u+'" alt="'+v.name+' 사진 '+(i+1)+'" loading="lazy" data-lb="'+i+'">'
       +'<button class="vpx" data-vpx="'+i+'" aria-label="사진 삭제">×</button></figure>'; });
     h+='</div>';
   }else{
@@ -382,6 +392,26 @@ function venuePhotoHTML(){
    +'위 버튼은 <b>최근 1년</b>으로 기간이 걸린 검색 결과로 열립니다. 직접 촬영했거나 사용 권한이 있는 사진은 URL을 등록해 주세요.</div>'
    +'</div></div>';
   return h;
+}
+function openLB(i){
+  const v=VEN[CUR], ps=v.vphotos||[]; if(!ps[i])return;
+  let el=document.getElementById('lb');
+  if(!el){ el=document.createElement('div'); el.id='lb';
+    el.innerHTML='<button class="lbx" aria-label="닫기">×</button><img alt=""><div class="lbn"></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click',ev=>{ if(ev.target.tagName!=='IMG') el.classList.remove('on'); });
+    addEventListener('keydown',ev=>{
+      if(!el.classList.contains('on'))return;
+      if(ev.key==='Escape')el.classList.remove('on');
+      if(ev.key==='ArrowRight')openLB((el.dataset.i|0)+1);
+      if(ev.key==='ArrowLeft')openLB((el.dataset.i|0)-1);
+    });
+  }
+  const n=ps.length, k=((i%n)+n)%n;
+  el.dataset.i=k;
+  el.querySelector('img').src=ps[k];
+  el.querySelector('.lbn').textContent=VEN[CUR].name+' 사진 '+(k+1)+' / '+n+(n>1?'  ·  ← → 키로 이동':'')+'  ·  클릭하면 닫힘';
+  el.classList.add('on');
 }
 function addVenuePhoto(){
   const el=document.getElementById('vpurl'); if(!el)return;
@@ -771,6 +801,8 @@ document.getElementById('app').addEventListener('click',e=>{
   if(fb){ v.flt=fb.dataset.f;
     fb.parentNode.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===fb)));
     filter(); return; }
+  const lbi=e.target.closest('[data-lb]');
+  if(lbi){ openLB(+lbi.dataset.lb); return; }
   const vx=e.target.closest('[data-vpx]');
   if(vx){ v.vphotos.splice(+vx.dataset.vpx,1); schedulePersist(); refreshVenuePhotos(); return; }
   if(e.target.closest('#vpaddbtn')){ addVenuePhoto(); return; }
