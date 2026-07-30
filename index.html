@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>경기장 좌석 배치 · 사석 관리</title>
 <style>
 :root{
@@ -131,6 +132,16 @@ h1 span{color:var(--mute);font-weight:500;font-size:.62em;letter-spacing:0;margi
 #lb .lbx{position:absolute;top:16px;right:20px;background:transparent;border:0;color:#EAF0F6;
   font-size:30px;line-height:1;cursor:pointer;padding:4px 10px}
 #lb .lbn{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:11.5px;color:#8DA0B2}
+.vpfail{display:none;flex-direction:column;gap:5px;align-items:flex-start;justify-content:center;
+  min-height:150px;padding:16px;border:1px dashed #45525F;border-radius:10px;background:#0D1319}
+.vpfail b{font-size:12.5px;color:#FF9B9B;font-weight:700}
+.vpfail span{font-size:11.5px;color:var(--faint);line-height:1.6}
+.vpfail a{font-size:11.5px;color:#8FC4F0;text-decoration:none;border:1px solid #2E4356;background:#111A22;
+  border-radius:7px;padding:5px 9px;margin-top:2px}
+.vpc.bad img,.phwrap.bad img{display:none}
+.vpc.bad .vpfail,.phwrap.bad .vpfail{display:flex}
+.phwrap{position:relative;margin-bottom:7px}
+.phwrap .vpfail{min-height:96px}
 .vpempty{font-size:12px;color:var(--faint);line-height:1.7;margin-bottom:11px}
 .vpadd{display:flex;gap:7px;flex-wrap:wrap}
 .vpurl{flex:1 1 240px;min-width:0;background:#0C1116;border:1px solid var(--line);border-radius:8px;
@@ -306,7 +317,10 @@ function photoHTML(v,z){
   const u=v.photos[z.id]||'';
   let h='<div class="phz"><div class="ph-h"><h3>시야 사진</h3>'
     +'<a class="ext" href="'+viewUrl(v,z)+'" target="_blank" rel="noopener noreferrer">자리어때에서 보기 ↗</a></div>';
-  if(u) h+='<a href="'+u+'" target="_blank" rel="noopener noreferrer"><img class="phimg" src="'+u+'" alt="'+z.id+'구역 시야" loading="lazy"></a>';
+  if(u) h+='<div class="phwrap"><img class="phimg" src="'+esc(u)+'" alt="'+z.id+'구역 시야" loading="lazy" referrerpolicy="no-referrer"'
+    +' onerror="this.closest(\'.phwrap\').classList.add(\'bad\')" onload="this.closest(\'.phwrap\').classList.remove(\'bad\')">'
+    +'<div class="vpfail"><b>사진을 불러오지 못했습니다</b>'
+    +'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">주소 직접 열어보기 ↗</a></div></div>';
   h+='<input class="phurl" data-pz="'+z.id+'" placeholder="직접 촬영한 시야 사진 URL을 붙여넣고 Enter" value="'+u.replace(/"/g,'&quot;')+'">'
     +'<div class="phnote">자리어때 사진은 저작권 보호 대상이라 링크로만 연결합니다. 직접 촬영·보유한 사진은 URL을 넣으면 모두에게 표시됩니다.</div></div>';
   return h;
@@ -363,6 +377,7 @@ function dmHTML(st){
    +'<span>판매 가능 <b>'+st.o+'</b>석</span>';
 }
 
+const esc=u=>String(u).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 function gq(v,kind){
   const P=v.place, q=encodeURIComponent(P.q);
   if(kind==='img') return 'https://www.google.com/search?tbm=isch&tbs=qdr:y&q='+q;
@@ -380,16 +395,22 @@ function venuePhotoHTML(){
   if(ps.length){
     h+='<div class="vpgrid">';
     ps.forEach((u,i)=>{ h+='<figure class="vpc">'
-      +'<img src="'+u+'" alt="'+v.name+' 사진 '+(i+1)+'" loading="lazy" data-lb="'+i+'">'
+      +'<img src="'+esc(u)+'" alt="'+v.name+' 사진 '+(i+1)+'" loading="lazy" referrerpolicy="no-referrer"'
+      +' data-lb="'+i+'" onerror="this.closest(\'.vpc\').classList.add(\'bad\')"'
+      +' onload="this.closest(\'.vpc\').classList.remove(\'bad\')">'
+      +'<div class="vpfail"><b>사진을 불러오지 못했습니다</b>'
+      +'<span>이미지가 외부 사이트 연결을 막고 있거나 주소가 만료됐을 수 있습니다.</span>'
+      +'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">주소 직접 열어보기 ↗</a></div>'
       +'<button class="vpx" data-vpx="'+i+'" aria-label="사진 삭제">×</button></figure>'; });
     h+='</div>';
   }else{
     h+='<div class="vpempty">등록된 사진이 없습니다. 아래에 사진 주소를 넣으면 접속한 모두에게 보입니다.</div>';
   }
-  h+='<div class="vpadd"><input class="vpurl" id="vpurl" placeholder="사진 URL을 붙여넣고 Enter (여러 장 등록 가능)">'
+  h+='<div class="vpadd"><input class="vpurl" id="vpurl" placeholder="사진 URL을 붙여넣고 Enter — .jpg / .png 로 끝나는 직접 주소">'
    +'<button class="btn" id="vpaddbtn">추가</button></div>'
    +'<div class="phnote">구글 이미지·지도 사진은 각 촬영자에게 저작권이 있어 이 화면에 직접 불러오지 않고 검색 링크로 연결합니다. '
-   +'위 버튼은 <b>최근 1년</b>으로 기간이 걸린 검색 결과로 열립니다. 직접 촬영했거나 사용 권한이 있는 사진은 URL을 등록해 주세요.</div>'
+   +'위 버튼은 <b>최근 1년</b>으로 기간이 걸린 검색 결과로 열립니다. 직접 촬영했거나 사용 권한이 있는 사진은 URL을 등록해 주세요.<br>'
+   +'뉴스·포털 이미지 주소는 외부 사이트에서의 표시를 막아둔 경우가 많아 엑스박스로 뜹니다. 이럴 땐 사진을 내려받아 다른 곳에 올린 뒤 그 주소를 넣어주세요.</div>'
    +'</div></div>';
   return h;
 }
@@ -397,7 +418,7 @@ function openLB(i){
   const v=VEN[CUR], ps=v.vphotos||[]; if(!ps[i])return;
   let el=document.getElementById('lb');
   if(!el){ el=document.createElement('div'); el.id='lb';
-    el.innerHTML='<button class="lbx" aria-label="닫기">×</button><img alt=""><div class="lbn"></div>';
+    el.innerHTML='<button class="lbx" aria-label="닫기">×</button><img alt="" referrerpolicy="no-referrer"><div class="lbn"></div>';
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{ if(ev.target.tagName!=='IMG') el.classList.remove('on'); });
     addEventListener('keydown',ev=>{
