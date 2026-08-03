@@ -81,10 +81,8 @@ h1 span{color:var(--mute);font-weight:500;font-size:.62em;letter-spacing:0;margi
 .zone:hover .zh{stroke:#FFFFFF80}
 .zone.on .zh{stroke:var(--pick);stroke-width:3.5}
 .zone.dim{opacity:.16;pointer-events:none}
-/* 좌석 점: 축소 상태에선 은은하게, 확대할수록 뚜렷하게 (가독성) */
-.dots{transition:opacity .18s}
-.plan[data-dots="lo"] .dots{opacity:.3}
-.plan[data-dots="mid"] .dots{opacity:.62}
+/* 배경 없는 도면: 좌석 점이 곧 구역 */
+.zone .zh{fill:transparent}
 .zl{font-weight:800;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:rgba(10,15,20,.45);stroke-width:2.6px}
 .zs{font-weight:700;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:rgba(10,15,20,.45);stroke-width:2px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 15px;padding:10px 15px;border-top:1px solid var(--line);font-size:11.5px;color:var(--mute)}
@@ -120,6 +118,15 @@ h1 span{color:var(--mute);font-weight:500;font-size:.62em;letter-spacing:0;margi
 .sq.x{color:#FFD9D9}
 .sq.w{background:#8FD9BC;color:#0B3A2A;cursor:default}
 .sq.p{background:#EFDA6E;color:#4A3A05}
+.sq.rv{background:var(--pick);color:#04353C}
+.sq.pend{box-shadow:inset 0 0 0 2px #4DD0E1;background:#173F47;color:#7FE3F2}
+.rvbar{display:flex;flex-direction:column;gap:7px;margin-bottom:11px}
+.rvrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.rvrow input{flex:1 1 150px;min-width:0}
+.rvlab{font-size:10.5px;font-weight:700;color:var(--faint);flex:0 0 52px}
+.rvsw{display:inline-flex;gap:4px;align-items:center;flex:0 0 auto}
+.cw{width:16px;height:16px;border-radius:5px;border:2px solid transparent;cursor:pointer;padding:0}
+.cw.on{border-color:#FFFFFF;box-shadow:0 0 0 1.5px rgba(255,255,255,.35)}
 .sq.y{background:var(--view)}
 .sq.c{background:var(--cons)}
 .sq.t{box-shadow:inset 0 0 0 1.5px var(--tbl)}
@@ -219,10 +226,14 @@ const ARROW={N:'↑ 코트',S:'↓ 코트',E:'코트 →',W:'← 코트'};
 const GATE_SK={'202':{g:'가',s:'L'},'203':{g:'가',s:'R'},'206':{g:'나',s:'L'},'207':{g:'나',s:'R'},
   '211':{g:'다',s:'L'},'212':{g:'다',s:'R'},'215':{g:'라',s:'L'},'216':{g:'라',s:'R'}};
 const GATE_ANG={'가':50,'나':130,'다':230,'라':310};
-/* 2층 로비(외곽) 1~10 출입구 — 사진 기준 위치 */
-const GATE_NUM=[[1,16],[2,52],[3,94],[4,140],[5,172],[6,190],[7,224],[8,270],[9,320],[10,355]];
+/* 2층 로비(외곽) 1~10 출입구 — 3층 구역 사이 통로 위치
+   1:기둥/301, 2:302/303, 3:304/305, 4:306/307, 5:308/기둥, 6:기둥/310, 7:311/312, 8:313/314, 9:315/316, 10:317/기둥 */
+const GATE_NUM=[[1,10],[2,50],[3,90],[4,130],[5,170],[6,190],[7,230],[8,270],[9,310],[10,350]];
 /* 좌석 기본 상태 → 표시 클래스: x사석 c콘솔 y시야 t테이블 w휠체어 p예비사석 */
 const bcls=(s,H)=>H?'x':({c:'c',y:'y',t:'t',w:'w',p:'p'}[s.b]||'');
+/* 지정석 라벨 색상 팔레트 */
+const RV_COLORS=['#4DD0E1','#5B9BFF','#69DB7C','#B197FC','#F783AC','#FFC078','#C0EB75','#E9ECEF'];
+let RVCOL=null;
 const NOTE_SK={'204':'1열 바로 앞은 빈 공간(해피존) · 그 너머가 코트',
   '302':'맨 뒷줄(10·11열) 가운데 빈 구간은 전광판 자리',
   '312':'뒷줄(9·10열) 가운데 빈 구간은 전광판 자리',
@@ -236,6 +247,7 @@ const shade=(hex,k)=>'#'+[1,3,5].map(i=>{const n=Math.max(0,Math.min(255,Math.ro
 /* 좌석 전개 + 상태 저장소 */
 KEYS.forEach(k=>{
   const v=VEN[k]; v.ov=new Map(); v.sel=null; v.flt='all'; v.tool='held'; v.z=1; v.done=new Set(); v.log=[]; v.photos={}; v.vphotos=[];
+  v.rsv=[]; v.rset=new Set(); v.rmap=new Map();   /* 지정석: [{t,zid,k:[r_c...],note,col}] + 조회용 Set/색상맵 */
   v.zones.forEach(z=>{
     z.seats=z.s.split(';').map(t=>{const p=t.split(','); return {r:+p[0],c:+p[1],n:+p[2],b:p[3]};});
     delete z.s;
@@ -255,20 +267,36 @@ KEYS.forEach(k=>{
     {a:240, sp:9.8, rr:[352,367], t:'전광판'}];
 });
 const KEY=(z,s)=>z.id+'#'+s.r+'_'+s.c;
+/* ── 지정석 ── */
+function buildRsv(v){ v.rset=new Set(); v.rmap=new Map();
+  (v.rsv||[]).forEach((e,i)=>{ if(!e.col)e.col=RV_COLORS[i%RV_COLORS.length];
+    e.k.forEach(kk=>{v.rset.add(e.zid+'#'+kk); v.rmap.set(e.zid+'#'+kk,e.col);}); }); }
+function cleanRsv(v){
+  v.rsv=(v.rsv||[]).filter(e=>{
+    const z=v.zones.find(x=>x.id===e.zid); if(!z)return false;
+    e.k=e.k.filter(kk=>{const p=kk.split('_'); return z.seats.some(s=>s.r==p[0]&&s.c==p[1]&&s.b!=='w');});
+    return e.k.length>0;
+  });
+  buildRsv(v);
+}
+const isRv=(v,z,s)=>v.rset.has(KEY(z,s));
+function rvNote(v,z,s){ const kk=s.r+'_'+s.c;
+  const e=[...v.rsv].reverse().find(e=>e.zid===z.id&&e.k.indexOf(kk)>=0);
+  return e?(e.note||''):''; }
 const held=(v,z,s)=>{const k=KEY(z,s); return v.ov.has(k)?v.ov.get(k):(s.b==='x');};
 const ed=(v,z,s)=>{const k=KEY(z,s); return v.ov.has(k)&&v.ov.get(k)!==(s.b==='x');};
 function zStat(v,z){
-  let h=0,y=0,c=0,p=0,w=0;
+  let h=0,y=0,c=0,p=0,w=0,rv=0;
   z.seats.forEach(s=>{if(s.b==='w'){w++;return;} const H=held(v,z,s);
-    if(H)h++; else if(s.b==='c')c++; else if(s.b==='y')y++; else if(s.b==='p')p++;});
+    if(H)h++; else if(isRv(v,z,s))rv++; else if(s.b==='c')c++; else if(s.b==='y')y++; else if(s.b==='p')p++;});
   const t=z.seats.length-w;
-  return {t:t,h:h,y:y,c:c,p:p,w:w,o:t-h-c};
+  return {t:t,h:h,y:y,c:c,p:p,w:w,rv:rv,o:t-h-c-rv};
 }
 function vStat(v){
-  let t=0,h=0,y=0,c=0,p=0,w=0,ea=0,er=0;
-  v.zones.forEach(z=>{const s=zStat(v,z); t+=s.t;h+=s.h;y+=s.y;c+=s.c;p+=s.p;w+=s.w;
+  let t=0,h=0,y=0,c=0,p=0,w=0,rv=0,ea=0,er=0;
+  v.zones.forEach(z=>{const s=zStat(v,z); t+=s.t;h+=s.h;y+=s.y;c+=s.c;p+=s.p;w+=s.w;rv+=s.rv;
     z.seats.forEach(sd=>{if(ed(v,z,sd)) (held(v,z,sd)?ea++:er++);});});
-  return {t:t,h:h,y:y,c:c,p:p,w:w,o:t-h-c,ea:ea,er:er};
+  return {t:t,h:h,y:y,c:c,p:p,w:w,rv:rv,o:t-h-c-rv,ea:ea,er:er};
 }
 function lum(x){const a=[1,3,5].map(i=>parseInt(x.substr(i,2),16)/255)
   .map(u=>u<=.03928?u/12.92:Math.pow((u+.055)/1.055,2.4));return .2126*a[0]+.7152*a[1]+.0722*a[2];}
@@ -342,12 +370,12 @@ function zoneDots(v,z){
       return[x+(s.r+0.5)*stepR, y+(cc+0.5)*stepC];};
   }
   z.seats.forEach(sd=>{
-    const H=held(v,z,sd);
-    const st=H?'x':({c:'c',y:'y',t:'t',w:'w',p:'p'}[sd.b]||'o');
+    const H=held(v,z,sd), rvc=(!H&&v.rmap)?v.rmap.get(z.id+'#'+sd.r+'_'+sd.c):null;
+    const st=H?'x':(rvc?('rv:'+rvc):({c:'c',y:'y',t:'t',w:'w',p:'p'}[sd.b]||'o'));
     const p=pos(sd); add(st,p[0],p[1],size/2);
   });
-  const CMAP={o:shade(col,-0.36),x:'#B81E1E',y:'#F2C744',c:'#3D8FD6',t:'#B77BC7',w:'#5BC79B',p:'#E3C94F'};
-  return Object.keys(P).map(k2=>'<path d="'+P[k2].join('')+'" fill="'+CMAP[k2]+'"'+(k2==='o'?' fill-opacity=".78"':'')+'/>').join('');
+  const CMAP={o:col,x:'#E24A4A',y:'#F2C744',c:'#3D8FD6',t:'#B77BC7',w:'#5BC79B',p:'#E3C94F'};
+  return Object.keys(P).map(k2=>'<path d="'+P[k2].join('')+'" fill="'+(k2.indexOf('rv:')===0?k2.slice(3):CMAP[k2])+'"'+(k2==='o'?' fill-opacity=".92"':'')+'/>').join('');
 }
 function radialPlan(v){
   const E=v.extras; CC=E.cx; CCY=E.cy;
@@ -375,20 +403,16 @@ function radialPlan(v){
   });
   (E.texts||[]).forEach(t=>{s+='<text x="'+t.x+'" y="'+t.y+'" text-anchor="middle" font-size="'+t.fs+'" font-weight="700" fill="'+t.f+'">'+t.t+'</text>';});
   v.zones.forEach(z=>{
-    const st=zStat(v,z), col=v.grades[z.g].color, ratio=st.t?st.h/st.t:0;
-    const f='#'+[1,3,5].map(i=>{const A=parseInt(col.substr(i,2),16),Bc=[226,74,74][(i-1)/2];
-      return Math.round(A+(Bc-A)*Math.min(1,ratio*1.15)).toString(16).padStart(2,'0');}).join('');
+    const st=zStat(v,z);
     let d,px,py,thin=false,f1=13.5,f2=9.5;
     if(z.geo.k==='box'){const[x,y,w,h]=z.geo.v;d='M'+x+' '+y+'h'+w+'v'+h+'h'+(-w)+'Z';px=x+w/2;py=y+h/2;
       thin=(h<26); if(w<44){f1=10.5;f2=8;}}
     else{d=arcSector(z.geo.rr,z.geo.a,z.geo.sp);const p=rp((z.geo.rr[0]+z.geo.rr[1])/2,z.geo.a);px=p[0];py=p[1];thin=(z.geo.sp<=10);}
-    const L=lum(f), tc = L>.62 ? '#D42B1E' : (L>.42 ? '#12181D' : '#FFFFFF');
+    const tc='#EAF0F6';
     let dots='';
     if(!thin){const m=[]; if(st.y)m.push('#F2C744'); if(st.c)m.push('#3D8FD6');
       m.forEach((c,i)=>{dots+='<circle cx="'+(px-(m.length-1)*5+i*10).toFixed(1)+'" cy="'+(py+20).toFixed(1)+'" r="3.2" fill="'+c+'"/>';});}
     s+='<g class="zone" data-z="'+z.id+'" tabindex="0" role="button" aria-label="'+z.id+' 구역 잔여 '+st.o+'석">'
-      +'<path d="'+d+'" fill="'+f+'" stroke="#FFFFFF" stroke-width="1.2" stroke-opacity=".5"/>'
-      +(st.h?'<path d="'+d+'" fill="url(#hz)" opacity="'+(.14+.4*ratio).toFixed(2)+'"/>':'')
       +'<g class="dots">'+zoneDots(v,z)+'</g>'
       +'<text class="zl" font-size="'+(thin?11:f1)+'" x="'+px.toFixed(1)+'" y="'+(py+(thin?4:-2)).toFixed(1)+'" fill="'+tc+'">'+z.id+'</text>'
       +(thin?'':'<text class="zs" font-size="'+f2+'" x="'+px.toFixed(1)+'" y="'+(py+10).toFixed(1)+'" fill="'+tc+'" opacity=".9">'+st.o+'석</text>')
@@ -408,9 +432,9 @@ function radialPlan(v){
        +'<rect x="'+(p[0]-13).toFixed(1)+'" y="'+(p[1]-8).toFixed(1)+'" width="26" height="16" rx="4" fill="#FFE3EA" stroke="#E03131" stroke-width="1.1"/>'
        +'<text x="'+p[0].toFixed(1)+'" y="'+(p[1]+3.5).toFixed(1)+'" text-anchor="middle" font-size="8.5" font-weight="800" fill="#C8102E">'+nm+'</text></g>';
     });
-    /* 2층 로비 1~10 출입구 (외곽 링) */
+    /* 2층 로비 1~10 출입구 — 3층 구역 사이 계단 통로 위 */
     GATE_NUM.forEach(g=>{
-      const p=rp(387,g[1]);
+      const p=rp(330,g[1]);
       s+='<g><title>'+g[0]+'번 출입구 (2층 로비)</title>'
        +'<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="9.5" fill="#FFC61A" stroke="#C8102E" stroke-width="1.6"/>'
        +'<text x="'+p[0].toFixed(1)+'" y="'+(p[1]+3.6).toFixed(1)+'" text-anchor="middle" font-size="10" font-weight="800" fill="#C8102E">'+g[0]+'</text></g>';
@@ -469,8 +493,11 @@ function detailHTML(v,z){
   let cells='';
   z.seats.forEach(s=>{
     const[gr,gc]=place(v,z,s), H=held(v,z,s);
-    const cls='sq '+bcls(s,H)+(ed(v,z,s)?' ed':'');
-    cells+='<div class="'+cls+'" data-r="'+s.r+'" data-c="'+s.c+'" style="grid-row:'+(gr+1)+';grid-column:'+(gc+1)+'">'
+    const rvc=(!H)?v.rmap.get(KEY(z,s)):null;
+    const cls='sq '+(H?'x':(rvc?'rv':bcls(s,false)))+(ed(v,z,s)?' ed':'')
+      +((MODE==='rsv'&&PEND.has(s.r+'_'+s.c))?' pend':'');
+    cells+='<div class="'+cls+'" data-r="'+s.r+'" data-c="'+s.c+'" style="grid-row:'+(gr+1)+';grid-column:'+(gc+1)
+      +(rvc?';background:'+rvc:'')+'">'
       +seatTxt(v,z,s,H)+'</div>';
   });
   const gap=(cell>13?2:1);
@@ -505,17 +532,77 @@ function detailHTML(v,z){
     +(v.key==='sk'?' · 코트 아래쪽 · 1열 코트측':' · 코트 '+FACE[z.face])+'</div>'
     +(gate2?'<div class="tag2" style="background:#E0313122;color:#FF9BAF">'+gate2.g+' 출입구 · 1층</div>':'')+'</div>'
     +'<div class="dm" id="dm">'+dmHTML(st)+'</div>'
-    +'<div class="zbtns"><button class="btn" data-all="1">구역 전체 사석</button>'
-    +'<button class="btn" data-all="0">구역 전체 해제</button>'
-    +'<button class="btn warn" data-all="r">이 구역 기본값 복원</button></div>'+stage
-    +'<div class="tipbar">클릭 = 지정↔해제 토글 · 드래그 = <b>시작 좌석의 반대 상태로 일괄 적용</b>(사석에서 시작하면 해제, 일반석에서 시작하면 지정). 흰 테두리는 원본에서 바뀐 좌석입니다.</div>'
+    +'<div class="zbtns"><div class="seg">'
+    +'<button data-md="held" aria-pressed="'+(MODE==='held')+'">사석 편집</button>'
+    +'<button data-md="rsv" aria-pressed="'+(MODE==='rsv')+'">지정석 편집</button></div>'
+    +(MODE==='held'?'<button class="btn" data-all="1">구역 전체 사석</button>'
+      +'<button class="btn" data-all="0">구역 전체 해제</button>'
+      +'<button class="btn warn" data-all="r">이 구역 기본값 복원</button>':'')+'</div>'
+    +(MODE==='rsv'?(function(){
+      const defCol=RVCOL||RV_COLORS[v.rsv.length%RV_COLORS.length];
+      return '<div class="rvbar">'
+      +'<div class="rvrow"><span class="rvlab">단체 지정</span>'
+      +'<input type="number" id="rvcount" class="vpurl" style="flex:0 0 70px" min="1" max="500" value="50">'
+      +'<button class="btn" id="rvauto">석수만큼 자동 선택 · 1열부터</button>'
+      +'<button class="btn" id="rvclear">선택 비우기</button>'
+      +'<span class="syncst" id="rvcnt">'+(PEND.size?('선택 '+PEND.size+'석'):'')+'</span></div>'
+      +'<div class="rvrow"><span class="rvlab">직접 입력</span>'
+      +'<input class="vpurl" id="rvspec" placeholder="예: 3열 1~5 · 7열 2,3 (그리드 드래그로도 선택됩니다)">'
+      +'<button class="btn" id="rvadd">선택에 추가</button></div>'
+      +'<div class="rvrow"><span class="rvlab">색 · 메모</span>'
+      +'<span class="rvsw" id="rvsw">'+RV_COLORS.map(c=>'<button class="cw'+(defCol===c?' on':'')+'" data-cc="'+c+'" style="background:'+c+'" aria-label="지정석 색"></button>').join('')+'</span>'
+      +'<input class="vpurl" id="rvnote" placeholder="메모 (예: ○○중학교 단체)">'
+      +'<button class="btn" id="rvok" style="border-color:#2E5B63;color:#4DD0E1;font-weight:700">확인(지정)</button></div>'
+      +'</div>';})():'')
+    +stage
+    +(MODE==='rsv'
+      ?'<div class="tipbar">드래그/클릭으로 좌석을 고르거나(청록 테두리 = 선택 중) 좌석·석수를 입력하고 <b>확인(지정)</b>을 누르면 지정석으로 저장됩니다. 이미 지정된 좌석(청록)은 클릭하면 해제됩니다.</div>'
+      :'<div class="tipbar">클릭 = 지정↔해제 토글 · 드래그 = <b>시작 좌석의 반대 상태로 일괄 적용</b>(사석에서 시작하면 해제, 일반석에서 시작하면 지정). 흰 테두리는 원본에서 바뀐 좌석입니다.</div>')
     +'<div class="mlog" id="mlog">'+memoHTML(v,z)+'</div>'
+    +rvListHTML(v,z)
     +photoHTML(v,z);
+}
+function rvEntryHTML(v,e,i,showZone){
+  const z=v.zones.find(x=>x.id===e.zid);
+  const ss=z?seatLabels(v,z,e.k):[];
+  const col=e.col||'#4DD0E1';
+  return '<div class="ml"><div class="ml-t">'
+    +'<span class="rvsw">'+RV_COLORS.map(c=>'<button class="cw'+(col===c?' on':'')+'" data-ci="'+i+'" data-cc="'+c+'" style="background:'+c+'" aria-label="라벨 색 변경"></button>').join('')+'</span>'
+    +'<b style="color:'+col+'">'+(showZone?e.zid+'구역 · ':'')+e.k.length+'석</b>'
+    +'<span class="tm">'+new Date(e.t).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</span>'
+    +(showZone?'<button class="btn" data-rvgo="'+e.zid+'" style="padding:2px 8px;font-size:10px">구역 열기</button>':'')
+    +'<button class="btn warn" data-rvdel="'+i+'" style="padding:2px 8px;font-size:10px">해제</button>'
+    +'<span class="seats">'+ss.slice(0,16).join(', ')+(ss.length>16?' 외 '+(ss.length-16)+'석':'')+'</span></div>'
+    +'<input class="mnote rvmemo" data-ri="'+i+'" placeholder="메모 입력 후 Enter" value="'+String(e.note||'').replace(/"/g,'&quot;')+'"></div>';
+}
+function rvListHTML(v,z){
+  const es=v.rsv.map((e,i)=>[e,i]).filter(x=>x[0].zid===z.id).reverse();
+  let h='<div class="mlog"><h3 style="color:#4DD0E1">이 구역 지정석</h3>';
+  if(!es.length) return h+'<div class="mnone">지정석이 없습니다. [지정석 편집]에서 드래그하거나 석수를 입력한 뒤 확인을 누르세요.</div></div>';
+  es.forEach(([e,i])=>{h+=rvEntryHTML(v,e,i,false);});
+  return h+'</div>';
+}
+function rvPanelHTML(){
+  const v=VEN[CUR];
+  let tot=0; v.rsv.forEach(e=>tot+=e.k.length);
+  let h='<div class="chk" id="rvpanel"><div class="chk-h"><h2 style="color:#4DD0E1">지정석 관리</h2>'
+    +'<div class="sub">'+(v.rsv.length?(v.rsv.length+'건 · '+tot+'석'):'등록 없음')+'</div></div><div class="chk-body">';
+  if(!v.rsv.length) h+='<div class="vpempty">등록된 지정석이 없습니다. 도면에서 구역을 누르고 [지정석 편집]에서 지정하면 여기에 모두 모아 보입니다.</div>';
+  else v.rsv.map((e,i)=>[e,i]).reverse().forEach(([e,i])=>{h+=rvEntryHTML(v,e,i,true);});
+  return h+'</div></div>';
+}
+function refreshRvUI(){
+  const v=VEN[CUR];
+  const p=document.getElementById('rvpanel');
+  if(p){const t=document.createElement('div');t.innerHTML=rvPanelHTML();p.replaceWith(t.firstElementChild);}
+  if(v.sel){const z=v.zones.find(x=>x.id===v.sel);
+    const d=document.getElementById('detail'); if(d&&z){d.innerHTML=detailHTML(v,z);bindGrid();}}
 }
 function dmHTML(st){
   return '<span>총 <b>'+st.t+'</b>석</span><span class="r">사석 <b class="r">'+st.h+'</b>석</span>'
    +(st.y?'<span class="y">시야방해 <b class="y">'+st.y+'</b>석</span>':'')
    +(st.c?'<span class="cn">콘솔석 <b class="cn">'+st.c+'</b>석</span>':'')
+   +(st.rv?'<span style="color:#4DD0E1">지정석 <b style="color:#4DD0E1">'+st.rv+'</b>석</span>':'')
    +(st.p?'<span class="y">예비 사석 <b class="y">'+st.p+'</b>석</span>':'')
    +(st.w?'<span style="color:#8FD9BC">휠체어석 <b style="color:#8FD9BC">'+st.w+'</b></span>':'')
    +'<span>판매 가능 <b>'+st.o+'</b>석</span>';
@@ -604,7 +691,7 @@ function render(){
     ? '<span><i style="background:#B77BC7"></i>3층 1열 테이블석</span><span><i style="background:#8FD9BC"></i>휠체어석</span><span><i style="background:#EFDA6E"></i>예비 사석</span>'
     : '<span><i style="background:#C3CB44"></i>응원단상</span><span><i style="background:#F2C744"></i>시야방해석</span><span><i style="background:#3D8FD6"></i>콘솔석</span>';
   const legend = Object.keys(v.grades).map(g=>'<span><i style="background:'+v.grades[g].color+'"></i>'+v.grades[g].name+'</span>').join('')
-    + extra + '<span><i style="background:#E24A4A"></i>사석(빗금)</span>';
+    + extra + '<span><i style="background:#4DD0E1"></i>지정석</span><span><i style="background:#E24A4A"></i>사석</span>';
   document.getElementById('app').innerHTML = HATCH
   +'<header class="board"><div class="board-in">'
   +'<div class="eyebrow"><b>'+v.eyebrow+'</b><span>'+v.sub+'</span></div>'
@@ -612,6 +699,7 @@ function render(){
   +'<div class="stats">'
   +'<div class="stat"><div class="k">TOTAL 총 좌석</div><div class="v mono c1" id="v1"></div><div class="d"></div></div>'
   +'<div class="stat"><div class="k">HELD 사석</div><div class="v mono c2" id="v2"></div><div class="d" id="vd"></div></div>'
+  +'<div class="stat"><div class="k">RESERVED 지정석</div><div class="v mono" style="color:#4DD0E1" id="v6"></div><div class="d"></div></div>'
   +(v.key==='jc'?'<div class="stat"><div class="k">OBSTRUCTED 시야방해</div><div class="v mono c3" id="v3"></div><div class="d"></div></div>'
                 +'<div class="stat"><div class="k">CONSOLE 콘솔석</div><div class="v mono c4" id="v4"></div><div class="d"></div></div>':'')
   +'<div class="stat"><div class="k">OPEN 판매 가능</div><div class="v mono c5" id="v5"></div><div class="d"></div></div>'
@@ -633,6 +721,7 @@ function render(){
   +'<div class="detail" id="detail"><div class="empty"><b>구역을 선택하세요</b>'
   +(v.key==='sk'?'구역을 누르면 도면에서 보는 방향 그대로(코트가 아래) 좌석이 펼쳐집니다.<br>(1열=맨 아랫줄 · 1번 좌석=왼쪽) 좌석 위를 드래그하면 사석을 지정/해제할 수 있습니다.'
     :'도면에서 구역을 누르면 코트를 향한 방향 그대로 좌석이 펼쳐집니다.<br>좌석 위를 드래그하면 사석을 지정하거나 해제할 수 있습니다.')+'</div></div></section></div>'
+  + rvPanelHTML()
   + venuePhotoHTML();
   drawPlan();
   if(v.sel){ const z=v.zones.find(x=>x.id===v.sel);
@@ -675,13 +764,94 @@ function filter(){
 }
 function stats(){
   const v=VEN[CUR], s=vStat(v), set=(id,val)=>{const e=document.getElementById(id); if(e)e.textContent=val.toLocaleString();};
-  set('v1',s.t); set('v2',s.h); set('v3',s.y); set('v4',s.c); set('v5',s.o);
+  set('v1',s.t); set('v2',s.h); set('v3',s.y); set('v4',s.c); set('v5',s.o); set('v6',s.rv);
   const d=document.getElementById('vd');
   if(d) d.innerHTML=(s.ea||s.er)?('직접 지정 <b>+'+s.ea+'</b> · 해제 <b>-'+s.er+'</b>'):'원본 기본값';
 }
 /* 편집 */
 let painting=false,dirty=false,moved=false,origin=null;
 let G={add:[]};
+let MODE='held', rvWant=true;
+const PEND=new Set();
+function rvCnt(msg){const el=document.getElementById('rvcnt'); if(el)el.textContent=msg||(PEND.size?('선택 '+PEND.size+'석'):'');}
+function applyPendDom(){
+  document.querySelectorAll('#sg .sq').forEach(el=>{
+    el.classList.toggle('pend',MODE==='rsv'&&PEND.has(el.dataset.r+'_'+el.dataset.c));});
+  rvCnt();
+}
+function paintRv(el){
+  if(!el||!el.classList.contains('sq'))return;
+  const v=VEN[CUR]; if(!v.sel)return;
+  const z=v.zones.find(x=>x.id===v.sel);
+  const s=z.seats.find(x=>x.r==el.dataset.r&&x.c==el.dataset.c); if(!s||s.b==='w')return;
+  if(held(v,z,s)||isRv(v,z,s))return;         /* 사석·기존 지정석 위엔 선택 불가 */
+  const kk=s.r+'_'+s.c;
+  if(rvWant)PEND.add(kk); else PEND.delete(kk);
+  el.classList.toggle('pend',PEND.has(kk));
+  rvCnt();
+}
+function removeRvSeat(v,z,kk){
+  for(let i=v.rsv.length-1;i>=0;i--){const e=v.rsv[i];
+    if(e.zid!==z.id)continue;
+    const j=e.k.indexOf(kk); if(j<0)continue;
+    e.k.splice(j,1); if(!e.k.length)v.rsv.splice(i,1);
+    break;
+  }
+  buildRsv(v); schedulePersist(); stats(); drawPlan(); refreshRvUI();
+}
+/* "3열 1~5 · 7열 2,3" 또는 "20석"(앞열부터 자동) 해석 */
+function parseSpec(v,z,txt){
+  const keys=[];
+  const usable=s=>s.b!=='w'&&!held(v,z,s)&&!isRv(v,z,s)&&!PEND.has(s.r+'_'+s.c);
+  const mc=txt.match(/^(\d{1,3})\s*석$/);
+  if(mc){
+    let need=+mc[1];
+    const rows={}; z.seats.forEach(s=>{(rows[s.r]=rows[s.r]||[]).push(s);});
+    const order=Object.keys(rows).map(Number).sort((a,b)=>a-b);   /* 앞열(1열)부터 채움 */
+    for(const r of order){ if(!need)break;
+      rows[r].slice().sort((p,q)=>cIdx(z,p)-cIdx(z,q)).forEach(s=>{
+        if(need&&usable(s)){keys.push(s.r+'_'+s.c);need--;}});
+    }
+    if(need>0) return {keys:keys,err:'가용 좌석이 '+keys.length+'석뿐이라 전부 선택했습니다'};
+    return {keys:keys};
+  }
+  const segs=txt.split(/[\/;]+/);
+  for(const seg of segs){
+    if(!seg.trim())continue;
+    const m=seg.match(/(\d+)\s*열\s*(.+)/);
+    if(!m) return {err:'형식: 3열 1~5 / 7열 2,3 / 20석'};
+    const r=+m[1]-1, nums=[];
+    m[2].split(/[,\s]+/).forEach(tok=>{ if(!tok)return;
+      const mr=tok.match(/^(\d+)\s*[~\-]\s*(\d+)\s*번?$/);
+      if(mr){for(let n=+mr[1];n<=+mr[2];n++)nums.push(n);}
+      else{const mo=tok.match(/^(\d+)\s*번?$/); if(mo)nums.push(+mo[1]);}
+    });
+    if(!nums.length) return {err:m[1]+'열 좌석 번호를 확인해 주세요'};
+    for(const n of nums){
+      const s=z.seats.find(x=>x.r===r&&x.n===n&&x.b!=='w');
+      if(!s) return {err:(r+1)+'열 '+n+'번 좌석이 없습니다'};
+      if(held(v,z,s)) return {err:(r+1)+'열 '+n+'번은 사석입니다'};
+      if(isRv(v,z,s)) return {err:(r+1)+'열 '+n+'번은 이미 지정석입니다'};
+      keys.push(s.r+'_'+s.c);
+    }
+  }
+  return {keys:keys};
+}
+function commitRv(){
+  const v=VEN[CUR]; if(!v.sel)return;
+  const z=v.zones.find(x=>x.id===v.sel);
+  const spec=document.getElementById('rvspec'), noteEl=document.getElementById('rvnote');
+  if(spec&&spec.value.trim()){
+    const r=parseSpec(v,z,spec.value.trim());
+    if(r.err&&!(r.keys&&r.keys.length)){spec.value='';spec.placeholder='⚠ '+r.err;return;}
+    (r.keys||[]).forEach(k=>PEND.add(k));
+  }
+  if(!PEND.size){ if(spec)spec.placeholder='⚠ 먼저 좌석을 드래그하거나 석수/좌석을 입력해 주세요'; rvCnt('⚠ 선택된 좌석이 없습니다'); return; }
+  v.rsv.push({t:Date.now(),zid:z.id,k:Array.from(PEND),note:noteEl?noteEl.value.trim():'',
+    col:RVCOL||RV_COLORS[v.rsv.length%RV_COLORS.length]});
+  RVCOL=null; PEND.clear();
+  buildRsv(v); schedulePersist(); stats(); drawPlan(); refreshRvUI();
+}
 function pruneLog(v){
   let ch=false;
   v.log=v.log.filter(e=>{
@@ -735,6 +905,7 @@ function applySeat(el,want){
   const z=v.zones.find(x=>x.id===v.sel);
   const s=z.seats.find(x=>x.r==el.dataset.r&&x.c==el.dataset.c); if(!s)return;
   if(s.b==='w')return;                         /* 휠체어석은 편집 제외 */
+  if(isRv(v,z,s))return;                       /* 지정석은 사석 편집에서 제외 */
   if(want===null) want=!held(v,z,s);           /* 클릭 = 토글 */
   if(held(v,z,s)===want)return;
   if(want) G.add.push(s.r+'_'+s.c);
@@ -750,17 +921,28 @@ function bindGrid(){
     painting=true;dirty=false;moved=false;origin=e.target;
     const v=VEN[CUR],z=v.zones.find(x=>x.id===v.sel);
     const sd=z.seats.find(x=>x.r==e.target.dataset.r&&x.c==e.target.dataset.c);
-    dragWant = sd ? !held(v,z,sd) : true;      /* 시작 좌석의 반대 상태로 일괄 적용 */
-    G={add:[]};
+    if(MODE==='rsv'){ rvWant = sd ? !PEND.has(sd.r+'_'+sd.c) : true; }
+    else { dragWant = sd ? !held(v,z,sd) : true;  /* 시작 좌석의 반대 상태로 일괄 적용 */
+      G={add:[]}; }
     sg.setPointerCapture(e.pointerId);e.preventDefault();});
   sg.addEventListener('pointermove',e=>{
     if(!painting)return;
     const el=document.elementFromPoint(e.clientX,e.clientY);
     if(!el||!el.classList.contains('sq'))return;
-    if(!moved){ if(el===origin)return; moved=true; paint(origin); }
-    paint(el);
+    const fn=(MODE==='rsv')?paintRv:paint;
+    if(!moved){ if(el===origin)return; moved=true; fn(origin); }
+    fn(el);
   });
   const end=()=>{if(!painting)return;
+    if(MODE==='rsv'){
+      if(!moved&&origin){
+        const v=VEN[CUR],z=v.zones.find(x=>x.id===v.sel);
+        const sd=z?z.seats.find(x=>x.r==origin.dataset.r&&x.c==origin.dataset.c):null;
+        if(sd&&isRv(v,z,sd)) removeRvSeat(v,z,sd.r+'_'+sd.c);
+        else paintRv(origin);
+      }
+      painting=false;origin=null;rvCnt();return;
+    }
     if(!moved&&origin) applySeat(origin,null);
     painting=false;origin=null; commitLog(); schedulePersist();
     if(dirty){const v=VEN[CUR],z=v.zones.find(x=>x.id===v.sel);
@@ -863,22 +1045,22 @@ function dl(name,data,mime){
 }
 const STAMP=()=>{const d=new Date();const p=n=>String(n).padStart(2,'0');
   return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes());};
-const STNAME={x:'사석',y:'시야방해석',c:'콘솔석',t:'테이블석',w:'휠체어석',p:'예비 사석',o:'판매 가능'};
-const STFILL={x:2,y:3,c:4,t:5,w:0,p:3,o:0};
+const STNAME={x:'사석',y:'시야방해석',c:'콘솔석',t:'테이블석',w:'휠체어석',p:'예비 사석',rv:'지정석',o:'판매 가능'};
+const STFILL={x:2,y:3,c:4,t:5,w:0,p:3,rv:4,o:0};
 function exportXlsx(v){
   const S=vStat(v);
   const sum=[[{v:v.name+' 좌석 현황',s:6}],[],
     ['총 좌석',S.t],['사석',S.h],['시야방해석',S.y],['콘솔석',S.c],['판매 가능',S.o],
     ['직접 지정한 사석',S.ea],['직접 해제한 사석',S.er],['내보낸 시각',new Date().toLocaleString('ko-KR')],[],
-    [{v:'구역',s:1},{v:'층',s:1},{v:'등급',s:1},{v:'코트 방향',s:1},{v:'총 좌석',s:1},{v:'사석',s:1},{v:'시야방해',s:1},{v:'콘솔',s:1},{v:'판매 가능',s:1}]];
+    [{v:'구역',s:1},{v:'층',s:1},{v:'등급',s:1},{v:'코트 방향',s:1},{v:'총 좌석',s:1},{v:'사석',s:1},{v:'지정석',s:1},{v:'시야방해',s:1},{v:'콘솔',s:1},{v:'판매 가능',s:1}]];
   const FN={N:'위쪽',S:'아래쪽',E:'오른쪽',W:'왼쪽'};
   v.zones.forEach(z=>{const s=zStat(v,z);
-    sum.push([z.id,(z.fl==='L'?'1층':z.fl==='U'?'2층':z.fl),v.grades[z.g].name,'코트 '+FN[z.face],s.t,s.h,s.y,s.c,s.o]);});
+    sum.push([z.id,(z.fl==='L'?'1층':z.fl==='U'?'2층':z.fl),v.grades[z.g].name,'코트 '+FN[z.face],s.t,s.h,s.rv,s.y,s.c,s.o]);});
   const list=[[{v:'구역',s:1},{v:'층',s:1},{v:'등급',s:1},{v:'열',s:1},{v:'좌석번호',s:1},{v:'상태',s:1},{v:'원본 대비',s:1}]];
   v.zones.forEach(z=>{
     const fl=(z.fl==='L'?'1층':z.fl==='U'?'2층':z.fl), gn=v.grades[z.g].name;
     z.seats.slice().sort((a,b)=>a.r-b.r||a.c-b.c).forEach(s=>{
-      const H=held(v,z,s), k=H?'x':({c:'c',y:'y',t:'t',w:'w',p:'p'}[s.b]||'o');
+      const H=held(v,z,s), k=H?'x':(isRv(v,z,s)?'rv':({c:'c',y:'y',t:'t',w:'w',p:'p'}[s.b]||'o'));
       list.push([z.id,fl,gn,rowLabel(v,z,s),s.b==='w'?'휠체어석':s.n,{v:STNAME[k],s:STFILL[k]},ed(v,z,s)?(H?'사석 추가':'사석 해제'):'']);
     });
   });
@@ -891,16 +1073,22 @@ function exportXlsx(v){
     if(!ss.length)return;
     mm.push([new Date(e.t).toLocaleString('ko-KR'),e.zid,ss.length+'석',ss.join(', '),e.note||'']);});
   if(mm.length===1)mm.push(['기록 없음','','','','']);
+  const rv=[[{v:'시각',s:1},{v:'구역',s:1},{v:'지정 좌석 수',s:1},{v:'좌석',s:1},{v:'메모',s:1}]];
+  v.rsv.forEach(e=>{const z=v.zones.find(x=>x.id===e.zid); if(!z)return;
+    const ss=seatLabels(v,z,e.k);
+    rv.push([new Date(e.t).toLocaleString('ko-KR'),e.zid,ss.length+'석',ss.join(', '),e.note||'']);});
+  if(rv.length===1)rv.push(['기록 없음','','','','']);
   const data=buildXlsx([
-    {name:'요약',rows:sum,w:[14,10,22,12,10,10,10,10,10]},
+    {name:'요약',rows:sum,w:[14,10,22,12,10,10,10,10,10,10]},
     {name:'좌석목록',rows:list,w:[10,8,22,10,10,12,12]},
     {name:'사석변경내역',rows:chg,w:[12,10,10,10]},
+    {name:'지정석기록',rows:rv,w:[19,8,18,60,34]},
     {name:'메모기록',rows:mm,w:[19,8,18,60,34]}]);
   dl(v.name+'_사석현황_'+STAMP()+'.xlsx',data,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 function saveState(){
   const o={app:'arena-seatmap',ver:1,savedAt:new Date().toISOString(),venues:{}};
-  KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos};});
+  KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos,rsv:VEN[k].rsv};});
   dl('좌석_사석설정_'+STAMP()+'.json',JSON.stringify(o,null,1),'application/json');
 }
 function loadState(file,done){
@@ -914,7 +1102,8 @@ function loadState(file,done){
       VEN[k].log=(Array.isArray(x)?[]:(x.log||[])).map(e=>({t:e.t,zid:e.zid,k:e.k||null,seats:e.seats||e.add||[],note:e.note||''}));
       VEN[k].photos=(Array.isArray(x)?{}:(x.photos||{}));
       VEN[k].vphotos=(Array.isArray(x)?[]:(x.vphotos||[]));
-      pruneLog(VEN[k]);});
+      VEN[k].rsv=(Array.isArray(x)?[]:(x.rsv||[])).map(e=>({t:e.t,zid:e.zid,k:e.k||[],note:e.note||'',col:e.col||''}));
+      cleanRsv(VEN[k]); pruneLog(VEN[k]);});
     done(null,o.savedAt);
   }catch(e){done('파일을 읽지 못했습니다. 저장 버튼으로 만든 JSON 파일인지 확인해 주세요.');}};
   fr.onerror=()=>done('파일을 읽지 못했습니다.');
@@ -955,8 +1144,50 @@ document.getElementById('vtabs').addEventListener('click',e=>{
 tabs(); render();});
 document.getElementById('app').addEventListener('click',e=>{
   const v=VEN[CUR];
+  const md=e.target.closest('[data-md]');
+  if(md&&v.sel){ MODE=md.dataset.md; PEND.clear();
+    const z=v.zones.find(x=>x.id===v.sel);
+    document.getElementById('detail').innerHTML=detailHTML(v,z); bindGrid(); return; }
+  if(e.target.closest('#rvok')){ commitRv(); return; }
+  if(e.target.closest('#rvclear')){ PEND.clear(); applyPendDom(); return; }
+  if(e.target.closest('#rvauto')&&v.sel){
+    const z=v.zones.find(x=>x.id===v.sel);
+    const n=Math.max(1,+((document.getElementById('rvcount')||{}).value||0));
+    PEND.clear();
+    const r=parseSpec(v,z,n+'석');
+    (r.keys||[]).forEach(k=>PEND.add(k));
+    applyPendDom(); if(r.err)rvCnt('⚠ '+r.err);
+    return; }
+  if(e.target.closest('#rvadd')&&v.sel){
+    const z=v.zones.find(x=>x.id===v.sel);
+    const spec=document.getElementById('rvspec'); if(!spec)return;
+    if(!spec.value.trim()){spec.placeholder='⚠ 예: 3열 1~5 · 7열 2,3';return;}
+    const r=parseSpec(v,z,spec.value.trim());
+    if(r.err&&!(r.keys&&r.keys.length)){spec.value='';spec.placeholder='⚠ '+r.err;return;}
+    (r.keys||[]).forEach(k=>PEND.add(k));
+    spec.value=''; applyPendDom(); return; }
+  const cw=e.target.closest('.cw');
+  if(cw){
+    if(cw.dataset.ci!==undefined){            /* 기존 지정석 라벨 색 변경 */
+      const b=v.rsv[+cw.dataset.ci];
+      if(b){ b.col=cw.dataset.cc; buildRsv(v); schedulePersist(); drawPlan(); refreshRvUI(); }
+    }else{                                    /* 새 지정 배치 색 선택 */
+      RVCOL=cw.dataset.cc;
+      document.querySelectorAll('#rvsw .cw').forEach(x=>x.classList.toggle('on',x.dataset.cc===RVCOL));
+    }
+    return; }
+  const rg=e.target.closest('[data-rvgo]');
+  if(rg){ v.sel=rg.dataset.rvgo; markOn(v.sel); PEND.clear(); MODE='rsv';
+    const z=v.zones.find(x=>x.id===v.sel);
+    document.getElementById('detail').innerHTML=detailHTML(v,z);
+    document.getElementById('dsub').textContent=z.id+' 구역'; bindGrid();
+    const g=document.querySelector('#app .grid'); if(g)g.scrollIntoView({behavior:'smooth'});
+    return; }
+  const rvd=e.target.closest('[data-rvdel]');
+  if(rvd){ v.rsv.splice(+rvd.dataset.rvdel,1); buildRsv(v); schedulePersist(); stats(); drawPlan();
+    refreshRvUI(); return; }
   const zg=e.target.closest('.zone');
-  if(zg){ v.sel=zg.dataset.z; markOn(v.sel);
+  if(zg){ v.sel=zg.dataset.z; markOn(v.sel); PEND.clear();
     const z=v.zones.find(x=>x.id===v.sel);
     document.getElementById('detail').innerHTML=detailHTML(v,z);
     document.getElementById('dsub').textContent=z.id+' 구역'; bindGrid(); return; }
@@ -994,6 +1225,9 @@ document.getElementById('app').addEventListener('click',e=>{
   const lb=e.target.closest('#load'); if(lb){ document.getElementById('lf').click(); return; }
 });
 document.getElementById('app').addEventListener('change',e=>{
+  const rm=e.target.closest('.rvmemo');
+  if(rm){ const v=VEN[CUR]; if(v.rsv[+rm.dataset.ri])v.rsv[+rm.dataset.ri].note=rm.value;
+    schedulePersist(); refreshRvUI(); return; }
   const mn=e.target.closest('.mnote');
   if(mn){ VEN[CUR].log[+mn.dataset.mi].note=mn.value; schedulePersist(); return; }
   const vu=e.target.closest('.vpurl');
@@ -1016,6 +1250,9 @@ document.getElementById('app').addEventListener('change',e=>{
   e.target.value='';
 });
 document.getElementById('app').addEventListener('keydown',e=>{
+  if(e.target.id==='rvspec'){ if(e.key==='Enter'){e.preventDefault();const b=document.getElementById('rvadd');if(b)b.click();} return; }
+  if(e.target.id==='rvcount'){ if(e.key==='Enter'){e.preventDefault();const b=document.getElementById('rvauto');if(b)b.click();} return; }
+  if(e.target.id==='rvnote'){ if(e.key==='Enter'){e.preventDefault();commitRv();} return; }
   if(e.target.classList&&e.target.classList.contains('vpurl')){
     if(e.key==='Enter'){e.preventDefault();addVenuePhoto();}
     return; }
@@ -1035,10 +1272,10 @@ document.addEventListener('mousemove',e=>{
     const s=z.seats.find(x=>x.r==sq.dataset.r&&x.c==sq.dataset.c);
     if(s){ const H=held(v,z,s);
       txt=z.id+'구역 '+rowLabel(v,z,s)+' '+(s.b==='w'?'휠체어석':(s.n+'번 · '
-        +(H?'사석':(s.b==='c'?'콘솔석':(s.b==='y'?'시야방해석':(s.b==='t'?'테이블석':(s.b==='p'?'예비 사석':'판매 가능'))))))); } }
+        +(H?'사석':(isRv(v,z,s)?('지정석'+(rvNote(v,z,s)?' — '+rvNote(v,z,s):'')):(s.b==='c'?'콘솔석':(s.b==='y'?'시야방해석':(s.b==='t'?'테이블석':(s.b==='p'?'예비 사석':'판매 가능')))))))); } }
   else if(zg&&!zg.classList.contains('dim')){
     const z=v.zones.find(x=>x.id===zg.dataset.z), s=zStat(v,z);
-    txt=z.id+' · 잔여 '+s.o+'/'+s.t+'석'+(s.h?' · 사석 '+s.h:'')+(s.y?' · 시야방해 '+s.y:'')+(s.c?' · 콘솔 '+s.c:''); }
+    txt=z.id+' · 잔여 '+s.o+'/'+s.t+'석'+(s.h?' · 사석 '+s.h:'')+(s.rv?' · 지정석 '+s.rv:'')+(s.y?' · 시야방해 '+s.y:'')+(s.c?' · 콘솔 '+s.c:''); }
   if(!txt){tip.style.opacity=0;return;}
   tip.textContent=txt;tip.style.opacity=1;
   tip.style.left=Math.min(innerWidth-tip.offsetWidth-10,e.clientX+14)+'px';
@@ -1079,7 +1316,7 @@ addEventListener('resize',()=>{const v=VEN[CUR];
 /* ── 자동 저장 · 공유 저장소 동기화 ── */
 const LSKEY='volleyball-seatmap-v1';
 function packState(){const o={ver:1,updatedAt:Date.now(),venues:{}};
-  KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos};});
+  KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos,rsv:VEN[k].rsv};});
   return o;}
 /* 좌석 배치가 바뀐 뒤 남은 옛 좌표의 지정값은 버림 */
 function cleanOv(v,ents){return (ents||[]).filter(e=>{
@@ -1091,7 +1328,8 @@ function applyState(o){ if(!o||!o.venues)return false;
   KEYS.forEach(k=>{const x=o.venues[k]||{};
     VEN[k].ov=new Map(cleanOv(VEN[k],x.ov)); VEN[k].done=new Set(x.done||[]);
     VEN[k].log=(x.log||[]).map(e=>({t:e.t,zid:e.zid,k:e.k||null,seats:e.seats||e.add||[],note:e.note||''}));
-    VEN[k].photos=x.photos||{}; VEN[k].vphotos=x.vphotos||[]; pruneLog(VEN[k]);});
+    VEN[k].photos=x.photos||{}; VEN[k].vphotos=x.vphotos||[];
+    VEN[k].rsv=(x.rsv||[]).map(e=>({t:e.t,zid:e.zid,k:e.k||[],note:e.note||'',col:e.col||''})); cleanRsv(VEN[k]); pruneLog(VEN[k]);});
   return true;}
 let shared=false,lastLocal=0,lastSeen=0,pushTimer=null,pushing=false;
 function syncBadge(txt,ok){const el=document.getElementById('syncst');
