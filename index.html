@@ -580,14 +580,15 @@ function detailHTML(v,z){
     +(MODE==='rsv'?(function(){
       const defCol=RVCOL||RV_COLORS[v.rsv.length%RV_COLORS.length];
       return '<div class="rvbar">'
-      +'<div class="rvrow"><span class="rvlab">단체 지정</span>'
+      +'<div class="rvrow"><span class="rvlab">좌석 선택</span>'
       +'<input type="number" id="rvcount" class="vpurl" style="flex:0 0 70px" min="1" max="500" value="50">'
       +'<button class="btn" id="rvauto">석수만큼 자동 선택 · 1열부터</button>'
+      +'<button class="btn" id="rvall">구역 전체 선택</button>'
       +'<button class="btn" id="rvclear">선택 비우기</button>'
       +'<span class="syncst" id="rvcnt">'+(PEND.size?('선택 '+PEND.size+'석'):'')+'</span></div>'
-      +'<div class="rvrow"><span class="rvlab">직접 입력</span>'
+      +(VIEW==='team'?'':'<div class="rvrow"><span class="rvlab">직접 입력</span>'
       +'<input class="vpurl" id="rvspec" placeholder="예: 3열 1~5 · 7열 2,3 (그리드 드래그로도 선택됩니다)">'
-      +'<button class="btn" id="rvadd">선택에 추가</button></div>'
+      +'<button class="btn" id="rvadd">선택에 추가</button></div>')
       +'<div class="rvrow"><span class="rvlab">'+(VIEW==='team'?'지정 팀':'색 · 메모')+'</span>'
       +(VIEW==='team'
         ?(function(){const T=getTeam(v,ACTIVE_TEAM);
@@ -797,6 +798,7 @@ function render(){
   +(v.key==='sk'?'구역을 누르면 도면에서 보이는 방향 그대로 좌석이 펼쳐집니다.<br>(1열은 항상 코트쪽) 좌석 위를 드래그하면 사석을 지정/해제할 수 있습니다.'
     :'도면에서 구역을 누르면 코트를 향한 방향 그대로 좌석이 펼쳐집니다.<br>좌석 위를 드래그하면 사석을 지정하거나 해제할 수 있습니다.')+'</div></div></section></div>'
   + rvPanelHTML()
+  + histPanelHTML()
   + venuePhotoHTML();
   drawPlan();
   if(v.sel){ const z=v.zones.find(x=>x.id===v.sel);
@@ -874,18 +876,41 @@ function addTeam(){
   ACTIVE_TEAM=n; el.value='';
   render();
 }
+let TEDIT=null;   /* 이름 수정 중인 팀 */
+function renameTeam(oldName,newName){
+  const v=VEN[CUR];
+  newName=(newName||'').trim();
+  if(!newName||newName===oldName){TEDIT=null;render();return;}
+  const oldT=getTeam(v,oldName);
+  v.teams=(v.teams||[]).filter(t=>t.name!==oldName);
+  if(!getTeams(v).some(t=>t.name===newName))
+    v.teams.push({name:newName,col:(oldT&&oldT.col)||RV_COLORS[0]});
+  v.rsv.forEach(e=>{ if((e.note||'').trim()===oldName) e.note=newName; });
+  if(ACTIVE_TEAM===oldName)ACTIVE_TEAM=newName;
+  TEDIT=null;
+  buildRsv(v); schedulePersist(); stats(); drawPlan(); render();
+}
 function teamBarHTML(v){
   const teams=getTeams(v);
   let h='<div class="chk teambar"><div class="chk-h"><h2>① 팀 · 단체 선택</h2>'
-    +'<div class="sub">팀을 고르면 그 팀 색으로 좌석이 지정됩니다</div></div><div class="chk-body"><div class="teamrow">';
+    +'<div class="sub">팀을 고르면 그 팀 색으로 좌석이 지정됩니다 · 선택된 팀의 ✎로 이름 수정</div></div><div class="chk-body"><div class="teamrow">';
   if(!teams.length) h+='<span class="syncst">아직 팀이 없습니다 — 아래에 팀 이름을 넣고 추가하세요.</span>';
   teams.forEach(t=>{
     h+='<button class="teamchip'+(ACTIVE_TEAM===t.name?' on':'')+'" data-team="'+esc(t.name)+'" style="border-color:'+t.col+';color:'+t.col+'">'
       +esc(t.name)+' <b>'+t.count+'석</b>'
+      +(ACTIVE_TEAM===t.name?'<span class="tedit" data-tedit="'+esc(t.name)+'" title="이름 수정"> ✎</span>':'')
       +(t.count?'':'<span class="tdel" data-tdel="'+esc(t.name)+'" title="팀 삭제"> ×</span>')+'</button>';
   });
-  h+='</div><div class="teamadd"><input class="vpurl" id="teamname" placeholder="새 팀 이름 입력 후 Enter (예: ○○중학교)">'
-    +'<button class="btn" id="teamaddbtn">＋ 팀 추가</button></div></div></div>';
+  h+='</div>';
+  if(TEDIT!==null){
+    h+='<div class="teamadd"><span class="rvlab" style="flex:0 0 auto;align-self:center">이름 수정</span>'
+      +'<input class="vpurl" id="teamrename" value="'+String(TEDIT).replace(/"/g,'&quot;')+'">'
+      +'<button class="btn" id="teamrenok">변경</button><button class="btn" id="teamrencancel">취소</button></div>';
+  }else{
+    h+='<div class="teamadd"><input class="vpurl" id="teamname" placeholder="새 팀 이름 입력 후 Enter (예: ○○중학교)">'
+      +'<button class="btn" id="teamaddbtn">＋ 팀 추가</button></div>';
+  }
+  h+='</div></div>';
   return h;
 }
 function renderTeamHTML(v){
@@ -1279,6 +1304,13 @@ document.getElementById('app').addEventListener('click',e=>{
     (r.keys||[]).forEach(k=>PEND.add(k));
     applyPendDom(); if(r.err)rvCnt('⚠ '+r.err);
     return; }
+  if(e.target.closest('#rvall')&&v.sel){
+    const z=v.zones.find(x=>x.id===v.sel);
+    PEND.clear();
+    z.seats.forEach(s=>{ if(s.b!=='w'&&!held(v,z,s)&&!isRv(v,z,s)) PEND.add(s.r+'_'+s.c); });
+    applyPendDom();
+    if(!PEND.size) rvCnt('⚠ 이 구역에 지정 가능한 좌석이 없습니다');
+    return; }
   if(e.target.closest('#rvadd')&&v.sel){
     const z=v.zones.find(x=>x.id===v.sel);
     const spec=document.getElementById('rvspec'); if(!spec)return;
@@ -1310,6 +1342,12 @@ document.getElementById('app').addEventListener('click',e=>{
   if(e.target.closest('#viewtog')){
     VIEW=(VIEW==='team'?'admin':'team'); MODE=(VIEW==='team'?'rsv':'held');
     PEND.clear(); render(); return; }
+  const ted=e.target.closest('[data-tedit]');
+  if(ted){ TEDIT=ted.dataset.tedit; render(); return; }
+  if(e.target.closest('#teamrenok')){
+    const el=document.getElementById('teamrename');
+    renameTeam(TEDIT, el?el.value:''); return; }
+  if(e.target.closest('#teamrencancel')){ TEDIT=null; render(); return; }
   const tdel=e.target.closest('[data-tdel]');
   if(tdel){ v.teams=(v.teams||[]).filter(t=>t.name!==tdel.dataset.tdel);
     if(ACTIVE_TEAM===tdel.dataset.tdel)ACTIVE_TEAM=null;
@@ -1355,6 +1393,28 @@ document.getElementById('app').addEventListener('click',e=>{
   if(e.target.closest('#rall')){ v.ov.clear(); pruneLog(v); schedulePersist(); stats(); drawPlan();
     if(v.sel){const z=v.zones.find(x=>x.id===v.sel);
       document.getElementById('detail').innerHTML=detailHTML(v,z);bindGrid();} return; }
+  if(e.target.closest('#histunlock')){
+    const p=document.getElementById('histpw');
+    if(p&&p.value===HPW){ HISTOK=true; HPWIN=p.value; refreshHist(); loadSrvHist(); }
+    else{ const m=document.getElementById('histmsg'); if(m)m.textContent='비밀번호가 다릅니다'; if(p)p.value=''; }
+    return; }
+  const hsr=e.target.closest('[data-hsr]');
+  if(hsr){
+    fetch('api/state?version='+hsr.dataset.hsr+'&pw='+encodeURIComponent(HPWIN),{cache:'no-store'})
+      .then(r=>r.ok?r.json():null)
+      .then(o=>{ if(o&&o.venues){ applyState({venues:o.venues}); render(); schedulePersist(); } });
+    return; }
+  const hr=e.target.closest('[data-hrestore]');
+  if(hr){ let hist=[]; try{hist=JSON.parse(localStorage.getItem(HKEY)||'[]');}catch(e2){}
+    const sn=hist[+hr.dataset.hrestore]; if(!sn)return;
+    try{ applyState({venues:JSON.parse(sn.d)}); render(); schedulePersist(); }catch(e2){}
+    return; }
+  const hd=e.target.closest('[data-hdl]');
+  if(hd){ let hist=[]; try{hist=JSON.parse(localStorage.getItem(HKEY)||'[]');}catch(e2){}
+    const sn=hist[+hd.dataset.hdl]; if(!sn)return;
+    try{ dl('좌석버전_'+new Date(sn.t).toLocaleString('sv-SE').replace(/[: ]/g,'-')+'.json',
+      JSON.stringify({app:'arena-seatmap',ver:1,savedAt:new Date(sn.t).toISOString(),venues:JSON.parse(sn.d)},null,1),'application/json'); }catch(e2){}
+    return; }
   const flash=(el,msg)=>{const o=el.textContent;el.textContent=msg;setTimeout(()=>{el.textContent=o;},1600);};
   const sv=e.target.closest('#save'); if(sv){ saveState(); flash(sv,'저장했습니다'); return; }
   const xb=e.target.closest('#xls'); if(xb){ exportXlsx(v); flash(xb,'내려받는 중…'); return; }
@@ -1387,6 +1447,8 @@ document.getElementById('app').addEventListener('change',e=>{
 });
 document.getElementById('app').addEventListener('keydown',e=>{
   if(e.target.id==='teamname'){ if(e.key==='Enter'){e.preventDefault();addTeam();} return; }
+  if(e.target.id==='teamrename'){ if(e.key==='Enter'){e.preventDefault();renameTeam(TEDIT,e.target.value);} return; }
+  if(e.target.id==='histpw'){ if(e.key==='Enter'){e.preventDefault();const b=document.getElementById('histunlock');if(b)b.click();} return; }
   if(e.target.id==='rvspec'){ if(e.key==='Enter'){e.preventDefault();const b=document.getElementById('rvadd');if(b)b.click();} return; }
   if(e.target.id==='rvcount'){ if(e.key==='Enter'){e.preventDefault();const b=document.getElementById('rvauto');if(b)b.click();} return; }
   if(e.target.id==='rvnote'){ if(e.key==='Enter'){e.preventDefault();commitRv();} return; }
@@ -1452,6 +1514,69 @@ addEventListener('resize',()=>{const v=VEN[CUR];
 })();
 /* ── 자동 저장 · 공유 저장소 동기화 ── */
 const LSKEY='volleyball-seatmap-v1';
+/* ── 시간대별 버전 기록(이 기기 브라우저 보관, 비밀번호 잠금) ── */
+const HKEY='volleyball-seatmap-hist-v1', HPW='0429';
+let HISTOK=false, HISTSRV=null, HPWIN='';
+async function loadSrvHist(){
+  if(!shared)return;
+  try{
+    const r=await fetch('api/state?versions=1&pw='+encodeURIComponent(HPWIN),{cache:'no-store'});
+    if(!r.ok)return;
+    const j=await r.json();
+    if(j&&j.versions){ HISTSRV=j.versions; refreshHist(); }
+  }catch(e){}
+}
+function takeSnapshot(){
+  try{
+    const o=packState();
+    let h=[]; try{h=JSON.parse(localStorage.getItem(HKEY)||'[]');}catch(e){}
+    const now=Date.now(), bucket=Math.floor(now/600000);   /* 10분 단위 */
+    const cur=JSON.stringify(o.venues);
+    const last=h[h.length-1];
+    if(last&&last.b===bucket){ last.t=now; last.d=cur; }
+    else h.push({t:now,b:bucket,d:cur});
+    while(h.length>72)h.shift();                            /* 최근 72개(약 12시간 연속 편집분) */
+    localStorage.setItem(HKEY,JSON.stringify(h));
+  }catch(e){}
+}
+function histPanelHTML(){
+  let h='<div class="chk" id="histpanel"><div class="chk-h"><h2 style="color:#F2C744">버전 기록</h2>'
+    +'<div class="sub">수정할 때마다 10분 단위로 자동 스냅샷 · 비밀번호 필요</div></div><div class="chk-body">';
+  if(!HISTOK){
+    h+='<div class="teamadd"><input class="vpurl" id="histpw" type="password" placeholder="비밀번호" style="max-width:180px" autocomplete="off">'
+      +'<button class="btn" id="histunlock">열기</button><span class="syncst" id="histmsg"></span></div>';
+  }else if(HISTSRV&&HISTSRV.length){
+    /* 공유 저장소(서버/깃허브) 버전 — 모든 기기 공통 */
+    h+=HISTSRV.slice().sort((a,b)=>b.t-a.t).map(sn=>{
+      const m=sn.meta||{};
+      const sum=sn.sum||((m.teams!=null)?(m.teams+'팀 · 지정석 '+(m.rv||0)+'석 · 수동 사석변경 '+(m.ov||0)+'건'):'');
+      return '<div class="rvs-row"><b class="rvs-name">'+new Date(sn.t).toLocaleString('ko-KR')+'</b>'
+        +'<span class="rvs-tot">'+esc(sum)+'</span>'
+        +'<button class="btn" data-hsr="'+(sn.id||sn.t)+'" style="padding:3px 10px;font-size:11px">이 버전으로 복원</button></div>';
+    }).join('');
+    h+='<div class="phnote">공유 저장소(깃허브 data/state.json 커밋 이력)에 보관된 버전입니다 — 모든 기기 공통, 비밀번호 아는 사람만 조회. 복원하면 현재 상태를 덮어쓰고, 복원 직후 상태도 새 커밋으로 저장됩니다.</div>';
+  }else{
+    let hist=[]; try{hist=JSON.parse(localStorage.getItem(HKEY)||'[]');}catch(e){}
+    if(!hist.length) h+='<div class="vpempty">아직 저장된 버전이 없습니다. 좌석을 수정하면 자동으로 쌓입니다.</div>';
+    else h+=hist.slice().reverse().map((sn,ri)=>{
+      const i=hist.length-1-ri; let sum='';
+      try{const d=JSON.parse(sn.d), sk=d.sk||{};
+        const rvs=(sk.rsv||[]).reduce((a,e)=>a+(e.k||[]).length,0);
+        sum=((sk.teams||[]).length)+'팀 · 지정석 '+rvs+'석 · 수동 사석변경 '+((sk.ov||[]).length)+'건';
+      }catch(e){}
+      return '<div class="rvs-row"><b class="rvs-name">'+new Date(sn.t).toLocaleString('ko-KR')+'</b>'
+        +'<span class="rvs-tot">'+sum+'</span>'
+        +'<button class="btn" data-hrestore="'+i+'" style="padding:3px 10px;font-size:11px">이 버전으로 복원</button>'
+        +'<button class="btn" data-hdl="'+i+'" style="padding:3px 10px;font-size:11px">JSON 내려받기</button></div>';
+    }).join('');
+    h+='<div class="phnote">이 버전 목록은 이 브라우저(내 기기) 보관분입니다. 공유 저장소(api/state)가 연결되면 서버 보관 버전이 대신 표시됩니다.</div>';
+  }
+  return h+'</div></div>';
+}
+function refreshHist(){
+  const p=document.getElementById('histpanel');
+  if(p){const t=document.createElement('div');t.innerHTML=histPanelHTML();p.replaceWith(t.firstElementChild);}
+}
 function packState(){const o={ver:1,updatedAt:Date.now(),venues:{}};
   KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos,rsv:VEN[k].rsv,teams:VEN[k].teams||[]};});
   return o;}
@@ -1475,8 +1600,9 @@ function syncBadge(txt,ok){const el=document.getElementById('syncst');
   if(el){el.textContent=txt;el.className='syncst'+(ok?' on':'');}}
 function schedulePersist(){ lastLocal=Date.now();
   try{localStorage.setItem(LSKEY,JSON.stringify(packState()));}catch(e){}
+  takeSnapshot();
   if(!shared){syncBadge('이 기기 브라우저에 자동 저장됨',false);return;}
-  clearTimeout(pushTimer); pushTimer=setTimeout(pushState,1200);
+  clearTimeout(pushTimer); pushTimer=setTimeout(pushState,3000);   /* 깃허브 커밋 저장이라 3초로 모아서 전송 */
   syncBadge('공유 저장 중…',true);}
 async function pushState(){ if(pushing){pushTimer=setTimeout(pushState,800);return;}
   pushing=true;
