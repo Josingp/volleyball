@@ -46,7 +46,11 @@ async function writeFile(obj, msg) {
       }),
     });
     if (r.ok) return;
-    if (r.status !== 409 && r.status !== 422) throw new Error('gh-write-' + r.status);
+    if (r.status !== 409 && r.status !== 422) {
+      let t = ''; try { t = (await r.text()).slice(0, 140); } catch (e) {}
+      /* 404 = 토큰에 쓰기 권한 없음/저장소·브랜치 불일치가 대부분 */
+      throw new Error('gh-write-' + r.status + (r.status === 404 ? ' (토큰 Contents 쓰기 권한 또는 GH_REPO/브랜치 확인)' : '') + ' ' + t);
+    }
   }
   throw new Error('gh-write-conflict');
 }
