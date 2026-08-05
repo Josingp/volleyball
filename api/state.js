@@ -60,6 +60,21 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const q = req.query || {};
+      if (q.diag !== undefined) {
+        /* 설정 자가진단: /api/state?diag=1 을 브라우저로 열어 확인 */
+        const out = { GH_REPO: GH_REPO || null, GH_BRANCH: GH_BRANCH, token: GH_TOKEN ? '설정됨' : '없음' };
+        const r1 = await fetch(`${API}/repos/${GH_REPO}`, { headers: HDR });
+        out.repoStatus = r1.status;
+        if (r1.ok) { const j = await r1.json(); out.defaultBranch = j.default_branch; out.canWrite = !!(j.permissions && j.permissions.push); }
+        const r2 = await fetch(`${API}/repos/${GH_REPO}/branches/${encodeURIComponent(GH_BRANCH)}`, { headers: HDR });
+        out.branchStatus = r2.status;
+        if (out.repoStatus === 401) out.진단 = 'GH_TOKEN이 유효하지 않습니다. 토큰 값을 다시 확인하세요.';
+        else if (out.repoStatus === 404) out.진단 = '저장소를 찾지 못했습니다. ① GH_REPO 값이 "아이디/저장소이름" 그대로인지, ② 토큰 발급 시 Repository access에서 이 저장소를 선택했는지 확인하세요.';
+        else if (out.canWrite === false) out.진단 = '토큰에 쓰기 권한이 없습니다. 토큰의 Permissions → Contents를 "Read and write"로 다시 발급해 GH_TOKEN을 교체하세요.';
+        else if (out.branchStatus === 404) out.진단 = '브랜치("' + GH_BRANCH + '")가 없습니다. 기본 브랜치가 "' + (out.defaultBranch || '?') + '"라면 환경변수 GH_BRANCH=' + (out.defaultBranch || 'master') + ' 를 추가하세요.';
+        else out.진단 = '설정 정상으로 보입니다. 저장을 다시 시도해 보세요.';
+        res.status(200).json(out); return;
+      }
       if (q.versions !== undefined || q.version !== undefined) {
         if (q.pw !== PW) { res.status(403).json({ error: 'forbidden' }); return; }
         if (q.version !== undefined) {
