@@ -1610,7 +1610,10 @@ async function pushState(){ if(pushing){pushTimer=setTimeout(pushState,800);retu
     const r=await fetch('api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});
     if(r.ok){lastSeen=o.updatedAt;const d=new Date();
       syncBadge('공유 저장소에 저장됨 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'),true);}
-    else syncBadge('공유 저장 실패 — 이 기기에만 저장됨',false);
+    else{
+      let why=''; try{const j=await r.json(); if(j&&j.error)why=' · 원인: '+String(j.error).slice(0,120);}catch(x){}
+      syncBadge('공유 저장 실패('+r.status+')'+why+' — 이 기기에만 저장됨',false);
+    }
   }catch(e){syncBadge('공유 저장 실패 — 이 기기에만 저장됨',false);}
   pushing=false;}
 async function pullState(first){
