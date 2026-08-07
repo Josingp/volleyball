@@ -1607,7 +1607,8 @@ function refreshHist(){
   const p=document.getElementById('histpanel');
   if(p){const t=document.createElement('div');t.innerHTML=histPanelHTML();p.replaceWith(t.firstElementChild);}
 }
-function packState(){const o={ver:1,updatedAt:Date.now(),venues:{}};
+const DATAREV=20260807;   /* 도면 기준일 — 이보다 오래된 공유 저장 데이터는 무시하고 새 도면 데이터로 덮어씀 */
+function packState(){const o={ver:1,rev:DATAREV,updatedAt:Date.now(),venues:{}};
   KEYS.forEach(k=>{o.venues[k]={ov:Array.from(VEN[k].ov.entries()),done:Array.from(VEN[k].done),log:VEN[k].log,photos:VEN[k].photos,vphotos:VEN[k].vphotos,rsv:VEN[k].rsv,teams:VEN[k].teams||[]};});
   return o;}
 /* 좌석 배치가 바뀐 뒤 남은 옛 좌표의 지정값은 버림 */
@@ -1651,7 +1652,11 @@ async function pullState(first){
   try{const r=await fetch('api/state',{cache:'no-store'}); if(!r.ok)throw 0;
     const o=await r.json();
     shared=true;
-    if(o&&o.venues){
+    if(o&&o.venues&&(o.rev||0)<DATAREV){
+      /* 공유 저장소에 예전 도면 기준 데이터가 남아 있음 → 받지 않고 이번 도면 데이터(0807 사석·MBC·팬엔터)로 덮어씀 */
+      syncBadge('공유 저장소의 옛 데이터를 새 도면 기준으로 갱신 중…',true);
+      pushState();
+    }else if(o&&o.venues){
       if(first||(o.updatedAt!==lastSeen&&!painting&&Date.now()-lastLocal>10000)){
         applyState(o); lastSeen=o.updatedAt||0; render();
       }
