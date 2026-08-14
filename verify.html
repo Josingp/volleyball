@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>확인증 검증 — 스태프</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#1B1760;--orange:#E97132;--ok:#15803D;--okbg:#DCFCE7;--bad:#B91C1C;--badbg:#FEE2E2}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;min-height:100vh;
+  display:flex;align-items:center;justify-content:center;padding:24px;background:#EEF0F6;transition:background .25s}
+body.ok{background:var(--ok)} body.bad{background:var(--bad)}
+.card{background:#fff;border-radius:24px;max-width:440px;width:100%;padding:30px 26px;text-align:center;
+  box-shadow:0 16px 40px rgba(0,0,0,.18)}
+.tag{font-size:12px;font-weight:800;letter-spacing:.12em;color:#8A86B8}
+.mark{font-size:64px;line-height:1;margin:14px 0 6px}
+h1{font-family:'Black Han Sans',sans-serif;font-weight:400;font-size:30px;color:var(--navy)}
+body.ok h1{color:var(--ok)} body.bad h1{color:var(--bad)}
+.who{font-family:'Black Han Sans',sans-serif;font-weight:400;font-size:40px;color:var(--navy);margin-top:16px}
+.seats{margin-top:6px;font-size:20px;font-weight:800;color:var(--navy);line-height:1.5}
+.ev{margin-top:12px;font-size:14px;font-weight:600;color:#555;line-height:1.5}
+.pill{display:inline-block;margin-top:14px;background:var(--okbg);color:var(--ok);
+  border-radius:999px;padding:7px 16px;font-size:14px;font-weight:800}
+body.bad .pill{background:var(--badbg);color:var(--bad)}
+.code{margin-top:14px;font-size:13px;font-weight:700;color:#666}
+.code b{font-family:'Black Han Sans',sans-serif;font-weight:400;font-size:24px;letter-spacing:.14em;color:var(--navy)}
+.clock{margin-top:16px;font-size:13px;font-weight:700;color:#8A86B8;font-variant-numeric:tabular-nums}
+button{margin-top:18px;width:100%;border:0;border-radius:14px;background:var(--navy);color:#fff;
+  font:800 16px/1 inherit;padding:14px 0;cursor:pointer}
+.hint{margin-top:10px;font-size:12px;color:#999;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="tag">STAFF VERIFY · 신인감독 김연경2</div>
+  <div class="mark" id="mark">⏳</div>
+  <h1 id="title">검증 중…</h1>
+  <div id="detail"></div>
+  <div class="clock" id="clock"></div>
+  <button onclick="location.reload()">다시 검증</button>
+  <p class="hint">참석자 화면의 <b>현장 확인코드</b>가 아래 코드와 일치하는지,<br>화면 시계가 실시간으로 움직이는지 함께 확인하세요.</p>
+</div>
+<script>
+(function(){
+  var off=0;
+  function pad(n){return (n<10?'0':'')+n}
+  function tick(){var d=new Date(Date.now()+off+9*3600e3);
+    document.getElementById('clock').textContent='서버 시각 '+pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds());}
+  setInterval(tick,300);
+
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function seatLines(seats){
+    var g={},o=[];(seats||[]).forEach(function(s){var k=s.z+'|'+s.r;if(!g[k]){g[k]={z:s.z,r:s.r,n:[]};o.push(k)}g[k].n.push(parseInt(s.no,10)||s.no)});
+    return o.map(function(k){var x=g[k],n=x.n.sort(function(a,b){return a-b});
+      var parts=[],st=n[0],pv=n[0];
+      for(var i=1;i<=n.length;i++){var v=n[i];
+        if(v===pv+1){pv=v;continue}
+        parts.push(st===pv?String(st):(pv-st===1?st+'·'+pv:st+'~'+pv));st=pv=v}
+      return esc(x.z)+'구역 '+esc(x.r)+'열 '+parts.join('·')+'번'+(n.length>1?' ('+n.length+'석)':'')}).join('<br>');
+  }
+
+  var t=new URLSearchParams(location.search).get('t')||'';
+  fetch('/api/check?t='+encodeURIComponent(t))
+    .then(function(r){return r.json()})
+    .then(function(d){
+      off=(d.now||Date.now())-Date.now();
+      var mark=document.getElementById('mark'),title=document.getElementById('title'),det=document.getElementById('detail');
+      if(d.ok){
+        document.body.className='ok'; mark.textContent='✅'; title.textContent='유효한 확인증';
+        var ev=d.event||{};
+        det.innerHTML='<div class="who">'+esc(d.name)+'</div>'+
+          '<div class="seats">'+seatLines(d.seats)+'</div>'+
+          '<div class="ev">'+esc([ev.title,ev.dateLabel,ev.venue].filter(Boolean).join(' · '))+'</div>'+
+          '<div class="pill">서명 검증 완료</div>'+
+          (d.code?'<div class="code">오늘의 현장 확인코드 <b>'+esc(d.code)+'</b></div>':'');
+      }else{
+        document.body.className='bad'; mark.textContent='⛔';
+        title.textContent = d.reason==='expired' ? '만료된 확인증' : '유효하지 않은 확인증';
+        det.innerHTML='<div class="pill">'+(d.reason==='expired'?'행사 기간이 지났습니다':'서명 불일치 — 위·변조 가능성')+'</div>';
+      }
+    })
+    .catch(function(){
+      document.body.className='bad';
+      document.getElementById('mark').textContent='⚠️';
+      document.getElementById('title').textContent='검증 실패 (네트워크)';
+    });
+})();
+</script>
+</body>
+</html>

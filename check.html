@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E97132">
+<meta name="robots" content="noindex">
+<title>좌석 확인 — 신인감독 김연경2 직관</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap" rel="stylesheet">
+<style>
+:root{
+  --orange:#E97132; --orange-deep:#D45F20; --navy:#1B1760; --navy-soft:#2A2578;
+  --white:#FFFFFF; --cream:#FFE9DC;
+  --disp:'Black Han Sans','Pretendard Variable',Pretendard,sans-serif;
+  --body:'Pretendard Variable',Pretendard,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%}
+body{
+  background:var(--orange); color:var(--navy); font-family:var(--body);
+  -webkit-font-smoothing:antialiased; padding-bottom:env(safe-area-inset-bottom);
+}
+main{max-width:560px;margin:0 auto;padding:16px 20px 40px}
+
+/* ── 실시간 스트립 (확인증 화면 전용) ── */
+.live-strip{
+  display:none; position:sticky; top:0; z-index:9;
+  background:var(--navy); color:var(--white);
+  font-size:13px; font-weight:600; letter-spacing:.02em;
+  padding:9px 14px calc(9px); text-align:center;
+}
+body.pass-mode .live-strip{display:flex;align-items:center;justify-content:center;gap:8px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#3DDC84;animation:blink 1.2s steps(2,start) infinite}
+.live-clock{font-variant-numeric:tabular-nums}
+@keyframes blink{50%{opacity:.15}}
+
+.logo{display:block;width:min(64vw,300px);margin:22px auto 6px}
+body.pass-mode .logo{width:min(46vw,210px);margin:14px auto 2px}
+
+/* ── 조회 카드 ── */
+.card{
+  background:var(--navy); color:var(--white);
+  border-radius:26px; padding:30px 26px 28px; margin-top:18px;
+  box-shadow:0 14px 34px rgba(27,23,96,.28);
+}
+.card h1{font-family:var(--disp);font-weight:400;font-size:30px;letter-spacing:.01em;text-align:center}
+.card .sub{margin:10px 0 22px;text-align:center;font-size:14.5px;line-height:1.6;color:var(--cream);opacity:.95}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:13px;font-weight:700;letter-spacing:.03em;margin-bottom:7px;color:var(--cream)}
+.field input{
+  width:100%;border:2px solid transparent;border-radius:14px;background:var(--white);
+  color:var(--navy);font:600 19px/1.3 var(--body);padding:14px 16px;outline:none;
+}
+.field input:focus-visible{border-color:var(--orange)}
+#btnGo{
+  width:100%;margin-top:10px;border:0;border-radius:14px;cursor:pointer;
+  background:var(--orange);color:var(--white);
+  font-family:var(--disp);font-size:22px;letter-spacing:.04em;padding:15px 0 14px;
+  transition:transform .08s ease, filter .15s;
+}
+#btnGo:active{transform:scale(.985)}
+#btnGo:disabled{filter:grayscale(.4) brightness(.85);cursor:wait}
+#btnGo:focus-visible{outline:3px solid var(--white);outline-offset:2px}
+.err{display:none;margin-top:14px;background:rgba(255,255,255,.1);border:1px solid rgba(255,233,220,.5);
+  border-radius:12px;padding:11px 13px;font-size:14px;line-height:1.55;white-space:pre-line;color:#FFE3D2}
+.err.show{display:block;animation:shake .3s}
+@keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+
+/* ── 확인증 ── */
+#pass{display:none}
+body.pass-mode #pass{display:block}
+body.pass-mode #lookup{display:none}
+.event-line{
+  text-align:center;font-weight:800;font-size:clamp(14px,4vw,17px);
+  letter-spacing:.01em;margin:8px 0 14px;line-height:1.5;
+}
+.pass-card{
+  position:relative;overflow:hidden;background:var(--navy);border-radius:26px;
+  padding:clamp(22px,6vw,34px) clamp(16px,5vw,28px);
+  display:grid;grid-template-columns:minmax(0,10fr) 6px minmax(0,15fr);align-items:center;
+  gap:clamp(12px,4vw,22px); box-shadow:0 14px 34px rgba(27,23,96,.30);
+}
+.pc-name{
+  font-family:var(--disp);color:var(--white);text-align:center;
+  font-size:clamp(30px,10.5vw,54px);line-height:1.1;word-break:keep-all;
+}
+.pc-bar{width:6px;height:78%;min-height:64px;background:var(--orange);border-radius:3px;justify-self:center}
+.pc-seat{color:var(--white);text-align:center;font-family:var(--disp);line-height:1.22}
+.pc-zone{font-size:clamp(26px,9vw,46px)}
+.pc-rowno{font-size:clamp(19px,6.4vw,33px);margin-top:4px}
+.pc-rowno .cnt{font-family:var(--body);font-weight:700;font-size:.55em;opacity:.85;letter-spacing:.02em}
+.pc-multi{font-size:clamp(17px,5.5vw,26px);margin-top:6px}
+/* 위조방지: 카드 위를 지나가는 시머 */
+.pass-card::after{
+  content:"";position:absolute;inset:-40%;pointer-events:none;
+  background:linear-gradient(115deg,transparent 42%,rgba(255,255,255,.16) 50%,transparent 58%);
+  animation:sweep 3.2s linear infinite;
+}
+@keyframes sweep{from{transform:translateX(-55%)}to{transform:translateX(55%)}}
+
+.meta-row{display:flex;gap:12px;margin-top:14px;align-items:stretch}
+.code-box{
+  flex:1;background:var(--white);border-radius:18px;padding:14px 16px;
+  display:flex;flex-direction:column;justify-content:center;min-width:0;
+}
+.code-box .lbl{font-size:12.5px;font-weight:800;letter-spacing:.05em;color:var(--orange-deep)}
+.code-box b{font-family:var(--disp);font-weight:400;font-size:clamp(26px,8vw,36px);letter-spacing:.14em;color:var(--navy);font-variant-numeric:tabular-nums}
+.code-box small{font-size:11.5px;color:#8A86B8;font-weight:600}
+.qr-box{background:var(--white);border-radius:18px;padding:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.qr-box .lbl{font-size:10.5px;font-weight:800;letter-spacing:.04em;color:#8A86B8}
+#qr{width:96px;height:96px}
+#qr img,#qr canvas{width:96px!important;height:96px!important}
+
+/* 위조방지: 마퀴 리본 */
+.marquee{
+  margin-top:14px;background:var(--navy);border-radius:12px;overflow:hidden;white-space:nowrap;
+  padding:8px 0;mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);
+}
+.marquee .track{display:inline-block;animation:mq 14s linear infinite}
+.marquee span{color:var(--cream);font-size:13px;font-weight:700;letter-spacing:.06em;padding-right:36px}
+@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+.capture-note{
+  margin-top:14px;text-align:center;font-size:13px;font-weight:800;line-height:1.6;
+  background:var(--white);border-radius:12px;padding:10px 12px;
+}
+.btn-ghost{
+  display:block;width:100%;margin-top:16px;border:2.5px solid var(--navy);border-radius:14px;
+  background:transparent;color:var(--navy);font:800 16px var(--body);padding:12px 0;cursor:pointer;
+}
+.btn-ghost:focus-visible{outline:3px solid var(--navy);outline-offset:2px}
+
+.disclaimer{
+  margin-top:26px;font-size:12px;font-weight:700;line-height:1.7;color:var(--navy);
+  text-align:left;opacity:.95;word-break:keep-all;
+}
+@media (prefers-reduced-motion: reduce){
+  .pass-card::after,.live-dot{animation:none}
+  .marquee .track{animation-duration:40s}
+}
+@media (max-width:340px){
+  .pass-card{grid-template-columns:1fr;gap:10px}
+  .pc-bar{width:64%;height:6px;min-height:6px}
+}
+</style>
+</head>
+<body>
+<div class="live-strip" aria-live="off">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span>실시간 화면</span>
+  <span class="live-clock" id="clock">--:--:--</span>
+</div>
+
+<main>
+  <img class="logo" id="logoImg" alt="신인감독 김연경2" src="logo.webp">
+
+  <section id="lookup" aria-label="좌석 조회">
+    <div class="card">
+      <h1>좌석 확인</h1>
+      <p class="sub">초대받으신 분의 <b>이름</b>과<br>등록된 <b>휴대폰 번호 뒤 4자리</b>를 입력해 주세요.</p>
+      <div class="field">
+        <label for="inName">이름</label>
+        <input id="inName" autocomplete="name" placeholder="예) 황민영" enterkeyhint="next">
+      </div>
+      <div class="field">
+        <label for="inPhone">휴대폰 번호 뒤 4자리</label>
+        <input id="inPhone" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="예) 1234" enterkeyhint="go">
+      </div>
+      <button id="btnGo">좌석 확인하기</button>
+      <p class="err" id="err" role="alert"></p>
+    </div>
+  </section>
+
+  <section id="pass" aria-label="좌석 확인증">
+    <div class="event-line" id="evLine"></div>
+    <div class="pass-card" id="passCard">
+      <div class="pc-name" id="pcName"></div>
+      <div class="pc-bar" aria-hidden="true"></div>
+      <div class="pc-seat" id="pcSeat"></div>
+    </div>
+    <div class="meta-row">
+      <div class="code-box">
+        <span class="lbl">현장 확인코드</span>
+        <b id="dayCode">------</b>
+        <small>매일 자동 변경 · 입장 시 대조용</small>
+      </div>
+      <div class="qr-box" id="qrBox">
+        <div id="qr" aria-label="스태프 검증 QR"></div>
+        <span class="lbl">STAFF SCAN</span>
+      </div>
+    </div>
+    <div class="marquee" aria-hidden="true"><div class="track" id="mqTrack"></div></div>
+    <p class="capture-note">⏱ 상단 시계가 멈춰 있으면 캡처 화면입니다.<br>입장 시 <b>실시간 화면</b>으로 제시해 주세요.</p>
+    <button class="btn-ghost" id="btnBack">다시 조회하기</button>
+  </section>
+
+  <footer class="disclaimer" id="legal">
+    * 본 화면은 &lt;신인감독 김연경 2&gt; 관계자를 통해 초대받은 수신자 본인만 사용 가능하며, 타인 사용 시 입장이 불가합니다.<br>
+    &nbsp;&nbsp;무단 유출 및 공유 시 법적 책임이 발생할 수 있습니다.
+  </footer>
+</main>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var timeOffset=0, clockTimer=null;
+
+  function pad(n){return (n<10?'0':'')+n}
+  function kstNow(){var d=new Date(Date.now()+timeOffset+9*3600e3);return d}
+  function fmtClock(){var d=kstNow();return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds())}
+  function fmtDate(){var d=kstNow();var w='일월화수목금토'[d.getUTCDay()];
+    return d.getUTCFullYear()+'. '+(d.getUTCMonth()+1)+'. '+d.getUTCDate()+' ('+w+')'}
+  function startClock(){
+    if(clockTimer) clearInterval(clockTimer);
+    var el=$('clock');
+    clockTimer=setInterval(function(){el.textContent=fmtDate()+' · '+fmtClock()},250);
+  }
+
+  /* 좌석 묶음 표기: 같은 구역·열의 연속 번호 → 4~8번(5석) */
+  function fmtSeats(seats){
+    var groups={}, order=[];
+    seats.forEach(function(s){
+      var k=s.z+'|'+s.r;
+      if(!groups[k]){groups[k]={z:s.z,r:s.r,nos:[]};order.push(k)}
+      groups[k].nos.push(parseInt(s.no,10)||s.no);
+    });
+    return order.map(function(k){
+      var g=groups[k]; var nums=g.nos.slice().sort(function(a,b){return a-b});
+      var parts=[],st=nums[0],pv=nums[0];
+      for(var i=1;i<=nums.length;i++){
+        var n=nums[i];
+        if(n===pv+1){pv=n;continue}
+        parts.push(st===pv?String(st):(pv-st===1?st+'·'+pv:st+'~'+pv));
+        st=pv=n;
+      }
+      return {z:g.z,r:g.r,label:parts.join('·'),count:nums.length};
+    });
+  }
+
+  function renderPass(d){
+    var ev=d.event||{};
+    $('evLine').textContent=[ev.title,ev.dateLabel,ev.venue].filter(Boolean).join(' · ');
+    $('pcName').textContent=d.name;
+    var gs=fmtSeats(d.seats||[]);
+    var seatEl=$('pcSeat'); seatEl.innerHTML='';
+    if(gs.length===1){
+      var g=gs[0];
+      seatEl.innerHTML='<div class="pc-zone">'+esc(g.z)+' 구역</div>'+
+        '<div class="pc-rowno">'+esc(g.r)+'열 / '+esc(g.label)+'번 좌석'+
+        (g.count>1?' <span class="cnt">('+g.count+'석)</span>':'')+'</div>';
+    }else{
+      gs.forEach(function(g){
+        seatEl.innerHTML+='<div class="pc-multi">'+esc(g.z)+'구역 '+esc(g.r)+'열 '+esc(g.label)+'번'+
+          (g.count>1?' <span class="cnt">('+g.count+'석)</span>':'')+'</div>';
+      });
+    }
+    $('dayCode').textContent=d.code||'------';
+
+    var iss=new Date(d.issuedAt+9*3600e3);
+    var issTxt=pad(iss.getUTCHours())+':'+pad(iss.getUTCMinutes())+':'+pad(iss.getUTCSeconds());
+    var mq='WONDERDOGS × 신인감독 김연경2 — 본인 확인용 · '+d.name+' · 발급 '+issTxt+' · 무단 공유 금지';
+    $('mqTrack').innerHTML='<span>'+esc(mq)+'</span><span>'+esc(mq)+'</span>';
+
+    var qrEl=$('qr'); qrEl.innerHTML='';
+    if(window.QRCode && d.token){
+      try{ new QRCode(qrEl,{text:location.origin+location.pathname.replace(/[^/]*$/,'')+'verify.html?t='+d.token,
+        width:96,height:96,correctLevel:QRCode.CorrectLevel.M}); }
+      catch(e){ $('qrBox').style.display='none'; }
+    } else { $('qrBox').style.display='none'; }
+
+    document.body.classList.add('pass-mode');
+    startClock();
+    window.scrollTo(0,0);
+  }
+
+  function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+
+  function showErr(msg){var e=$('err');e.textContent=msg;e.classList.remove('show');void e.offsetWidth;e.classList.add('show')}
+
+  var busy=false;
+  function go(){
+    if(busy) return;
+    var name=$('inName').value.trim(), p4=$('inPhone').value.replace(/\D/g,'');
+    if(!name){showErr('이름을 입력해 주세요.');$('inName').focus();return}
+    if(p4.length!==4){showErr('휴대폰 번호 뒤 4자리를 입력해 주세요.');$('inPhone').focus();return}
+    busy=true; var btn=$('btnGo'); btn.disabled=true; btn.textContent='확인 중…';
+    fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'lookup',name:name,phone4:p4})})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(d && d.ok){ timeOffset=(d.now||Date.now())-Date.now(); renderPass(d); }
+        else showErr(d && d.msg ? d.msg : '일치하는 정보를 찾을 수 없습니다.\n입력한신 이름과 번호를 다시 확인해 주세요.');
+      })
+      .catch(function(){showErr('네트워크 오류입니다. 연결 상태를 확인해 주세요.')})
+      .finally(function(){busy=false;btn.disabled=false;btn.textContent='좌석 확인하기'});
+  }
+
+  $('btnGo').addEventListener('click',go);
+  $('inName').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();$('inPhone').focus()}});
+  $('inPhone').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();go()}});
+  $('inPhone').addEventListener('input',function(){this.value=this.value.replace(/\D/g,'').slice(0,4)});
+  $('btnBack').addEventListener('click',function(){
+    document.body.classList.remove('pass-mode');
+    if(clockTimer) clearInterval(clockTimer);
+    $('inName').value='';$('inPhone').value='';$('err').classList.remove('show');
+    $('inName').focus(); window.scrollTo(0,0);
+  });
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+</body>
+</html>
