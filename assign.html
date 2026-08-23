@@ -37,16 +37,18 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 .zhead{font-size:12.5px;color:var(--mute);margin:0 0 8px}
 .row{display:flex;gap:3px;margin-bottom:3px;align-items:center}
 .rl{width:74px;min-width:74px;font-size:10.5px;color:var(--faint);text-align:right;padding-right:6px}
-.seat{width:46px;height:27px;min-width:46px;border-radius:5px;border:1px solid #33404C;background:#20303E;
-  font-size:10.5px;display:flex;align-items:center;justify-content:center;color:#9DB4C8;cursor:default;
-  overflow:hidden;white-space:nowrap;user-select:none;position:relative}
+.seat{width:60px;height:42px;min-width:60px;border-radius:6px;border:1px solid #33404C;background:#20303E;
+  font-size:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#9DB4C8;cursor:default;
+  overflow:hidden;white-space:nowrap;user-select:none;position:relative;line-height:1.18;padding:1px 3px}
+.seat .rp{font-size:8.5px;font-weight:600;opacity:.72;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.seat .nm2{font-size:11.5px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .seat.gap{visibility:hidden}
 .seat.o{cursor:pointer}
 .seat.y{background:#3A3418;border-color:#5C511F;color:#D8C25A}
 .seat.x{background:#2A1D1D;border-color:#4A2B2B;color:#7A5252;cursor:not-allowed}
 .seat.c{background:#1C2E40;border-color:#2E4B66;color:#5E88AC;cursor:not-allowed}
 .seat.blk{box-shadow:inset 0 0 0 2px var(--bcol,transparent)}
-.seat.asg{background:#213326;border-color:#3E5F42;color:#D9F2DC;font-weight:700;font-size:11px;cursor:grab}
+.seat.asg{background:#213326;border-color:#3E5F42;color:#D9F2DC;cursor:grab}
 .seat.asg.y{background:#3A3418;color:#F2E4A0}
 .seat.hov{outline:2px solid var(--sel)}
 .seat.selp{outline:2px solid var(--maple)}
@@ -54,7 +56,12 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .side h3{font-size:13.5px;margin:2px 0 8px}
 .side h3 b{color:var(--maple)}
-.chips{display:flex;flex-direction:column;gap:5px;max-height:520px;overflow:auto}
+.chips{display:flex;flex-direction:column;gap:5px;overflow-y:auto;overflow-x:hidden;
+  max-height:calc(100vh - 320px);min-height:220px;padding-right:2px}
+#q{width:100%;background:#12171D;border:1px solid var(--line);color:var(--ink);border-radius:8px;
+  padding:7px 10px;font:inherit;font-size:12.5px;margin:0 0 8px}
+#q::placeholder{color:var(--faint)}
+#qcnt{font-size:11px;color:var(--faint);margin:-4px 0 6px;display:none}
 .ghead{font-size:11.5px;color:var(--faint);margin:7px 0 1px;border-bottom:1px dashed var(--line);padding-bottom:2px}
 .chip{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:#141A21;border-radius:8px;
   padding:5px 8px;font-size:12.5px;cursor:grab}
@@ -112,6 +119,8 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
     </div>
     <div class="panel side">
       <h3>미배정 <b id="left">0</b>명 <span style="font-weight:400;color:var(--faint);font-size:11px">· 드래그: 좌석으로 놓기 / 순서 바꾸기 · 클릭: 선택 후 좌석 클릭</span></h3>
+      <input type="search" id="q" placeholder="이름 · 팀 · 대표자 검색">
+      <div id="qcnt"></div>
       <div class="chips" id="chips"></div>
     </div>
   </div>
@@ -216,22 +225,33 @@ function renderGrid(){
       const own=M.owner[s.key];
       let cls='seat '+s.b+(p?' asg':'')+(own?' blk':'')+(SELP&&pid===SELP?' selp':'');
       let sty=own?' style="--bcol:'+(teamCol[own]||'#556')+'"':'';
-      const label=p?p.name:(s.b==='x'?'사석':(s.b==='c'?'카메라':s.n));
-      const tt=CURZ+' '+s.n+'번'+(s.b==='y'?' · 시야제한':'')+(own?' · '+own+' 블록':'')+(p?' · '+p.team+' '+p.name:'');
+      let label;
+      if(p){
+        const rp=p.rep||p.team;
+        label=(rp?'<span class="rp">('+esc(rp)+')</span>':'')+'<span class="nm2">'+esc(p.name)+'</span>';
+      } else label=(s.b==='x'?'사석':(s.b==='c'?'카메라':String(s.n)));
+      const tt=CURZ+' '+s.n+'번'+(s.b==='y'?' · 시야제한':'')+(own?' · '+own+' 블록':'')+(p?' · '+p.team+' '+(p.rep||'')+' '+p.name:'');
       h+='<span class="'+cls+'"'+sty+' data-k="'+s.key+'" title="'+tt+'"'+(p?' draggable="true"':'')+'>'+label+'</span>';
     }
     h+='</div>';
   }
   $('#grid').innerHTML=h;
 }
+let Q='';
 function renderChips(){
   const un=A.order.map(byId).filter(p=>p&&!A.seats[p.id]);
-  const groups=[]; const gi={};
-  un.forEach(p=>{const gk=p.team+' · '+(p.rep||'-');
-    if(gi[gk]==null){gi[gk]=groups.length;groups.push({gk,list:[]});} groups[gi[gk]].list.push(p);});
   $('#left').textContent=un.length;
+  const q=Q.trim().toLowerCase();
+  const vis=q? un.filter(p=>(p.name+' '+p.team+' '+p.rep).toLowerCase().indexOf(q)>=0) : un;
+  const qc=$('#qcnt');
+  if(q){qc.style.display='block';qc.textContent='검색 결과 '+vis.length+'명 / 미배정 '+un.length+'명';}
+  else qc.style.display='none';
+  const groups=[]; const gi={};
+  vis.forEach(p=>{const gk=p.team+' · '+(p.rep||'-');
+    if(gi[gk]==null){gi[gk]=groups.length;groups.push({gk,list:[]});} groups[gi[gk]].list.push(p);});
   $('#chips').innerHTML=groups.map(g=>'<div class="ghead">'+esc(g.gk)+' <span style="float:right">'+g.list.length+'명</span></div>'
-    +g.list.map(p=>chipHTML(p)).join('')).join('')||'<div style="color:var(--faint);font-size:12.5px">모두 배정되었습니다 🎉</div>';
+    +g.list.map(p=>chipHTML(p)).join('')).join('')
+    ||'<div style="color:var(--faint);font-size:12.5px">'+(q?'검색 결과가 없습니다':'모두 배정되었습니다 🎉')+'</div>';
 }
 function chipHTML(p){
   return '<div class="chip'+(SELP===p.id?' selp':'')+'" draggable="true" data-p="'+p.id+'">'
@@ -300,6 +320,7 @@ document.addEventListener('drop',e=>{
   }
   if(e.target.closest('.side')){unplace(pid);DRAGP=null;}
 });
+$('#q') && document.addEventListener('input',e=>{ if(e.target.id==='q'){Q=e.target.value; renderChips();} });
 /* 탭 */
 $('#fltabs').addEventListener('click',e=>{const b=e.target.closest('[data-fl]');if(!b)return;CURFL=b.dataset.fl;CURZ=M.floors[CURFL][0];renderAll();});
 $('#ztabs').addEventListener('click',e=>{const b=e.target.closest('[data-z]');if(!b)return;CURZ=b.dataset.z;renderTabs();renderGrid();});
