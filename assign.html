@@ -165,8 +165,8 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 
 <div id="editbox"></div>
 <div id="tip"></div>
-<script src="assets/xlsx.full.min.js?v=260823q"></script>
-<script src="assets/assign-core.js?v=260823q"></script>
+<script src="assets/xlsx.full.min.js?v=260823r"></script>
+<script src="assets/assign-core.js?v=260823r"></script>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -694,7 +694,9 @@ $('#btnAuto').onclick=()=>{
   for(const pid in A.seats){
     const p=byId(pid); if(!p) continue;
     const key=A.seats[pid], own=M.owner[key], st=M.seatsByKey[key];
+    const outZone=p.zones.length && p.zones.indexOf(key.split('#')[0])<0;   /* 지정 구역 밖 */
     const bad=(own && !AssignCore.teamMatchesBlock(p.team,own))
+           || outZone
            || (p.okY && st && st.b!=='y')                 /* 시야OK는 무조건 시야제한석 */
            || (!p.okY && !own && !allowFree);
     if(bad){recall++;continue;}

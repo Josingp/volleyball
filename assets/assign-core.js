@@ -233,45 +233,15 @@ function autoAssign(model, roster, order, seats0, opts){
     }
     else carry.push(ctx);
   });
-  /* ── 2단계: 지정 구역에 못 들어간 그룹만, 그러고도 남은 자리로 통째 이월 ── */
+  /* ── 지정 구역 밖으로는 절대 이동하지 않음: 못 들어가면 전원 미배정 ── */
   carry.forEach(ctx => {
-    if (!pin && ctx.allOkY){
-      const cand = prefZoneIds(model, Object.assign({}, ctx.rep0, { zones: [] })).filter(z => ctx.zids.indexOf(z) < 0);
-      const scored = cand.map(zid => {
-        const zone = model.byZone[zid]; if (!zone) return null;
-        const cnt = zone.seats.filter(x => x.b === 'y' && !taken[x.key] &&
-          (!model.owner[x.key] || teamMatchesBlock(ctx.gp.team, model.owner[x.key]))).length;
-        return cnt >= ctx.need ? { zid, cnt } : null;
-      }).filter(Boolean).sort((a, b) => b.cnt - a.cnt);
-      const hit = tryZones(ctx, scored.map(x => x.zid), true);
-      if (hit){
-        warnings.push('구역 변경: ' + ctx.gLabel + ' ' + ctx.need + '명 — 지정 구역에 시야제한석이 부족해 ' + hit.zid + ' 구역 시야제한석으로 함께 이동');
-        commit(ctx, hit); return;
-      }
-      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 붙여 앉을 시야제한석이 없어 전원 미배정');
-      return;
-    }
-    if (!pin && ctx.teamBlock){
-      const extra = teamBlockZones(model, ctx.rep0.team).filter(z => ctx.zids.indexOf(z) < 0);
-      const scored = extra.map(zid => {
-        const zone = model.byZone[zid]; if (!zone) return null;
-        const cnt = zone.seats.filter(x => seatAllowed(model, ctx.gp, x, taken, true)).length;
-        return cnt >= ctx.need ? { zid, cnt } : null;
-      }).filter(Boolean).sort((a, b) => b.cnt - a.cnt);      /* 남은 자리 많은 구역부터 (VIP열 등 작은 구역 보존) */
-      const hit = tryZones(ctx, scored.map(x => x.zid), true);
-      if (hit){
-        warnings.push('구역 변경: ' + ctx.gLabel + ' ' + ctx.need + '명 — 지정 구역이 가득 차 ' + hit.zid + ' 구역으로 함께 이동');
-        commit(ctx, hit); return;
-      }
-    }
-    if (!pin && allowFree){
-      const hit = tryZones(ctx, prefZoneIds(model, Object.assign({}, ctx.rep0, { zones: [] })), false);
-      if (hit){ commit(ctx, hit); return; }
-    }
-    if (!ctx.teamBlock && !allowFree)
+    if (!ctx.teamBlock && !allowFree && !ctx.allOkY){
       warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 대분류 "' + (ctx.rep0.team || '(빈칸)') + '"에 해당하는 지정블록이 없습니다 (자유석 배정 금지 상태)');
-    else
-      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 한 구역에 붙여 앉을 자리가 없어 전원 미배정');
+    } else if (ctx.allOkY){
+      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 지정 구역 안에 붙여 앉을 시야제한석이 없어 전원 미배정');
+    } else {
+      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 지정 구역 안에 붙여 앉을 자리가 없어 전원 미배정');
+    }
   });
   /* 정원 초과 안내: 팀 명단이 블록 총 좌석보다 많으면 맨 위에 요약 */
   if (!allowFree){
