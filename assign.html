@@ -80,6 +80,23 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 #tip{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0E1A24;border:1px solid #2E4B66;
   color:#CFE6F8;padding:8px 14px;border-radius:10px;font-size:12.5px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:40}
 #tip.on{opacity:1}
+.bks{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}
+.bk{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11.5px;color:var(--mute)}
+.bk i{width:9px;height:9px;border-radius:3px;display:inline-block}
+.bk b{color:var(--ink)}
+.bk .rm{color:var(--maple)}
+.parthead{font-size:12.5px;color:var(--ink);font-weight:700;margin:12px 0 4px}
+.parthead small{color:var(--faint);font-weight:600;margin-left:6px}
+.colhead{display:flex;gap:3px;margin:0 0 3px}
+.colhead span{width:60px;min-width:60px;text-align:center;font-size:9.5px;color:var(--faint)}
+.courtbar{width:38px;border-radius:8px;background:linear-gradient(#2C6E80,#2C6E80) padding-box;border:1px solid #3A7E92;
+  display:flex;align-items:center;justify-content:center;color:#CFEFF9;font-weight:800;font-size:12px;
+  writing-mode:vertical-rl;letter-spacing:6px;align-self:stretch}
+#mini{margin-top:12px}
+#mini svg{width:100%;max-width:600px;display:block;background:#141A21;border:1px solid var(--line);border-radius:10px}
+#mini .mz{cursor:pointer}
+#mini .mz:hover path{stroke:#8FB4D6}
+
 </style>
 </head>
 <body>
@@ -104,6 +121,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 
   <div class="main">
     <div class="panel">
+      <div class="bks" id="blkstats"></div>
       <div class="ztabs" id="fltabs"></div>
       <div class="ztabs" id="ztabs"></div>
       <div class="gridwrap" id="grid"></div>
@@ -115,6 +133,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
         <span><i style="background:#1C2E40"></i>카메라</span>
         <span>테두리색 = 팀 지정블록</span>
       </div>
+      <div id="mini"></div>
       <div id="warnbox"></div>
     </div>
     <div class="panel side">
@@ -136,6 +155,15 @@ const $=s=>document.querySelector(s);
 let M=null, VENJC=null;                       /* 좌석 모델 */
 let A={roster:[],order:[],seats:{},updatedAt:0};   /* 배정 상태(공유 저장) */
 let CURFL='1층', CURZ=null, SELP=null, DRAGP=null;
+const COMBO={KLN1:['K1','L1','N1']};                 /* 한 파트로 묶어 보는 구역 */
+const IN_COMBO={K1:'KLN1',L1:'KLN1',N1:'KLN1'};
+function dispZones(fl){
+  const out=[]; M.floors[fl].forEach(zid=>{
+    const cb=IN_COMBO[zid];
+    if(cb){ if(out.indexOf(cb)<0) out.push(cb); } else out.push(zid);
+  }); return out;
+}
+function zidsOf(dz){ return COMBO[dz]||[dz]; }
 let STATE=null, shared=false, lastLocal=0, pushT=null;
 const LSKEY='jc-assign-v1';
 const teamCol={}; /* 팀 지정블록 색 */
@@ -168,7 +196,7 @@ async function boot(){
   (rsv||[]).forEach(e=>{ if(e.note&&e.col) teamCol[e.note]=e.col; });
   M=AssignCore.buildModel(VENJC, rsv);
   A.roster=A.roster||[]; A.order=A.order||A.roster.map(p=>p.id); A.seats=A.seats||{};
-  CURZ=M.floors['1층'][0];
+  CURZ=dispZones('1층')[0];
   renderAll();
   if(shared) setInterval(poll,15000);
 }
@@ -202,17 +230,56 @@ function save(){
 const pidOnSeat={};
 function rebuildSeatIdx(){ for(const k in pidOnSeat)delete pidOnSeat[k]; for(const pid in A.seats)pidOnSeat[A.seats[pid]]=pid; }
 function byId(id){ return A.roster.find(p=>p.id===id); }
-function renderAll(){ rebuildSeatIdx(); renderTabs(); renderGrid(); renderChips(); renderCnt(); }
+function renderAll(){ rebuildSeatIdx(); renderTabs(); renderGrid(); renderChips(); renderCnt(); renderBlk(); renderMini(); }
 function renderTabs(){
   $('#fltabs').innerHTML=['1층','2층'].map(f=>'<button class="ztab'+(f===CURFL?' on':'')+'" data-fl="'+f+'">'+f+'</button>').join('');
-  $('#ztabs').innerHTML=M.floors[CURFL].map(zid=>{
-    const zone=M.byZone[zid];
-    const tot=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
-    const asg=zone.seats.filter(s=>pidOnSeat[s.key]).length;
-    return '<button class="ztab'+(zid===CURZ?' on':'')+(asg&&asg>=tot?' full':'')+'" data-z="'+zid+'">'+zid+'<i>'+asg+'/'+tot+'</i></button>';
+  $('#ztabs').innerHTML=dispZones(CURFL).map(dz=>{
+    let tot=0,asg=0;
+    zidsOf(dz).forEach(zid=>{const zone=M.byZone[zid];
+      tot+=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
+      asg+=zone.seats.filter(s=>pidOnSeat[s.key]).length;});
+    const nm=COMBO[dz]?zidsOf(dz).join('·'):dz;
+    return '<button class="ztab'+(dz===CURZ?' on':'')+(asg&&asg>=tot?' full':'')+'" data-z="'+dz+'">'+nm+'<i>'+asg+'/'+tot+'</i></button>';
   }).join('');
 }
+function seatCell(s){
+  const pid=pidOnSeat[s.key], p=pid&&byId(pid);
+  const own=M.owner[s.key];
+  let cls='seat '+s.b+(p?' asg':'')+(own?' blk':'')+(SELP&&pid===SELP?' selp':'');
+  let sty=own?' style="--bcol:'+(teamCol[own]||'#556')+'"':'';
+  let label;
+  if(p){ const rp=p.rep||p.team;
+    label=(rp?'<span class="rp">('+esc(rp)+')</span>':'')+'<span class="nm2">'+esc(p.name)+'</span>';
+  } else label=(s.b==='x'?'사석':(s.b==='c'?'카메라':String(s.n)));
+  const tt=s.zid+' '+s.n+'번'+(s.b==='y'?' · 시야제한':'')+(own?' · '+own+' 블록':'')+(p?' · '+p.team+' '+(p.rep||'')+' '+p.name:'');
+  return '<span class="'+cls+'"'+sty+' data-k="'+s.key+'" title="'+tt+'"'+(p?' draggable="true"':'')+'>'+label+'</span>';
+}
+function renderKLN(){
+  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 오른쪽이 코트 방향 · 맨 오른쪽 세로줄이 1열(코트쪽)</div>';
+  h+='<div style="display:flex;gap:10px;align-items:stretch"><div style="flex:1;min-width:0">';
+  zidsOf('KLN1').forEach(zid=>{
+    const zone=M.byZone[zid];
+    const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
+    const tot=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
+    const asg=zone.seats.filter(s=>pidOnSeat[s.key]).length;
+    h+='<div class="parthead">'+zid+'<small>'+asg+' / '+tot+'석</small></div>';
+    h+='<div class="colhead">';
+    for(let r=zone.nR-1;r>=0;r--) h+='<span>'+(r+1)+'열'+(r===0?'·코트쪽':'')+'</span>';
+    h+='</div>';
+    for(let c=0;c<zone.nC;c++){
+      h+='<div class="row">';
+      for(let r=zone.nR-1;r>=0;r--){
+        const s=cell[r+'_'+c];
+        h+= s? seatCell(s) : '<span class="seat gap"></span>';
+      }
+      h+='</div>';
+    }
+  });
+  h+='</div><div class="courtbar">코트</div></div>';
+  $('#grid').innerHTML=h;
+}
 function renderGrid(){
+  if(CURZ==='KLN1'){renderKLN();return;}
   const zone=M.byZone[CURZ]; if(!zone){$('#grid').innerHTML='';return;}
   const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
   let h='<div class="zhead"><b>'+CURZ+'</b> 구역 · 1열이 코트쪽 · 좌석을 클릭/드래그해 이동, 이름을 좌석에 놓아 배정</div>';
@@ -220,18 +287,7 @@ function renderGrid(){
     h+='<div class="row"><span class="rl">'+(r+1)+'열'+(r===0?'(코트쪽)':'')+'</span>';
     for(let c=0;c<zone.nC;c++){
       const s=cell[r+'_'+c];
-      if(!s){h+='<span class="seat gap"></span>';continue;}
-      const pid=pidOnSeat[s.key], p=pid&&byId(pid);
-      const own=M.owner[s.key];
-      let cls='seat '+s.b+(p?' asg':'')+(own?' blk':'')+(SELP&&pid===SELP?' selp':'');
-      let sty=own?' style="--bcol:'+(teamCol[own]||'#556')+'"':'';
-      let label;
-      if(p){
-        const rp=p.rep||p.team;
-        label=(rp?'<span class="rp">('+esc(rp)+')</span>':'')+'<span class="nm2">'+esc(p.name)+'</span>';
-      } else label=(s.b==='x'?'사석':(s.b==='c'?'카메라':String(s.n)));
-      const tt=CURZ+' '+s.n+'번'+(s.b==='y'?' · 시야제한':'')+(own?' · '+own+' 블록':'')+(p?' · '+p.team+' '+(p.rep||'')+' '+p.name:'');
-      h+='<span class="'+cls+'"'+sty+' data-k="'+s.key+'" title="'+tt+'"'+(p?' draggable="true"':'')+'>'+label+'</span>';
+      h+= s? seatCell(s) : '<span class="seat gap"></span>';
     }
     h+='</div>';
   }
@@ -265,6 +321,63 @@ function renderCnt(){
   $('#cnt').innerHTML='명단 <b>'+tot+'</b>명 · 배정 <b>'+asg+'</b> · 미배정 <b>'+(tot-asg)+'</b>';
 }
 function esc(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+/* 팀 지정블록 사용 현황: 배치 / 블록 크기 / 남음 */
+function renderBlk(){
+  const tot={},used={};
+  for(const k in M.owner) tot[M.owner[k]]=(tot[M.owner[k]]||0)+1;
+  for(const pid in A.seats){const own=M.owner[A.seats[pid]]; if(own)used[own]=(used[own]||0)+1;}
+  let freeT=0,freeU=0;
+  for(const k in M.seatsByKey){const st=M.seatsByKey[k];
+    if((st.b==='o'||st.b==='y')&&!M.owner[k]){freeT++; if(pidOnSeat[k])freeU++;}}
+  const order=(VENJC.teams||[]).map(t=>t.name).filter(n=>tot[n]);
+  Object.keys(tot).forEach(n=>{if(order.indexOf(n)<0)order.push(n);});
+  $('#blkstats').innerHTML=order.map(n=>{
+    const u=used[n]||0,t=tot[n];
+    return '<span class="bk"><i style="background:'+(teamCol[n]||'#889')+'"></i>'+esc(n)
+      +' <b>'+u+'</b>/'+t+' · <span class="rm">남음 '+(t-u)+'</span></span>';
+  }).join('')+'<span class="bk"><i style="background:#5C6B79"></i>자유석 <b>'+freeU+'</b>/'+freeT+' · <span class="rm">남음 '+(freeT-freeU)+'</span></span>';
+}
+/* 아래 전체 코트 지도(미니맵): 구역 클릭으로 이동, 채움 정도 표시 */
+function renderMini(){
+  const E=VENJC.extras, CC=E.cx, CCY=E.cy;
+  const rp=(r,a)=>[CC+r*Math.cos(a*Math.PI/180), CCY-r*Math.sin(a*Math.PI/180)];
+  const arc=(rr,a,sp)=>{const g=0.5,ri=rr[0],ro=rr[1],a0=a-sp/2+g,a1=a+sp/2-g,N=Math.max(6,Math.round(sp/3)),pt=[];
+    for(let i=0;i<=N;i++)pt.push(rp(ro,a0+(a1-a0)*i/N));
+    for(let i=N;i>=0;i--)pt.push(rp(ri,a0+(a1-a0)*i/N));
+    return 'M'+pt.map(q=>q[0].toFixed(1)+' '+q[1].toFixed(1)).join('L')+'Z';};
+  let sv='<svg viewBox="0 0 '+E.vw+' '+E.vh+'" role="img" aria-label="전체 좌석 현황 지도">';
+  (E.ring||[]).forEach(r=>{sv+='<circle cx="'+CC+'" cy="'+CCY+'" r="'+r.r+'" fill="none" stroke="'+r.s+'" stroke-width="'+r.w+'" opacity=".5"/>';});
+  const ct=E.court; if(ct){sv+='<rect x="'+(ct.x-12)+'" y="'+(ct.y-12)+'" width="'+(ct.w+24)+'" height="'+(ct.h+24)+'" rx="4" fill="#2C6E80"/>'
+    +'<rect x="'+ct.x+'" y="'+ct.y+'" width="'+ct.w+'" height="'+ct.h+'" fill="#E8973F" stroke="#F4F7F9" stroke-width="2"/>'
+    +'<line x1="'+(ct.x+ct.w/2)+'" y1="'+(ct.y-12)+'" x2="'+(ct.x+ct.w/2)+'" y2="'+(ct.y+ct.h+12)+'" stroke="#F4F7F9" stroke-width="2"/>'
+    +'<text x="'+(ct.x+ct.w/2)+'" y="'+(ct.y+ct.h/2+5)+'" text-anchor="middle" font-size="15" font-weight="800" fill="#7A4A16">코트</text>';}
+  M.zones.forEach(z0=>{
+    const z=VENJC.zones.find(v=>v.id===z0.id);
+    let d,px,py;
+    if(z.geo.k==='box'){
+      const[x,y,w,hh]=z.geo.v; px=x+w/2; py=y+hh/2;
+      const rot=z.geo.rot||0;
+      if(rot){const RA=rot*Math.PI/180,RC=Math.cos(RA),RS=Math.sin(RA);
+        const cs=[[x,y],[x+w,y],[x+w,y+hh],[x,y+hh]].map(q=>{const dx=q[0]-px,dy=q[1]-py;return[(px+dx*RC-dy*RS).toFixed(1),(py+dx*RS+dy*RC).toFixed(1)];});
+        d='M'+cs.map(q=>q[0]+' '+q[1]).join('L')+'Z';}
+      else d='M'+x+' '+y+'h'+w+'v'+hh+'h'+(-w)+'Z';
+    }else{
+      d=arc(z.geo.rr,z.geo.a,z.geo.sp);
+      const q=rp((z.geo.rr[0]+z.geo.rr[1])/2,z.geo.a); px=q[0]; py=q[1];
+    }
+    const tot=z0.seats.filter(x=>x.b==='o'||x.b==='y').length;
+    const asg=z0.seats.filter(x=>pidOnSeat[x.key]).length;
+    const prog=tot?asg/tot:0;
+    const fill=tot? 'rgb('+Math.round(38+prog*10)+','+Math.round(49+prog*110)+','+Math.round(60+prog*20)+')' : '#232B33';
+    const dz=IN_COMBO[z0.id]||z0.id;
+    const cur=(CURZ===dz);
+    sv+='<g class="mz" data-mz="'+dz+'"><path d="'+d+'" fill="'+fill+'" stroke="'+(cur?'#FFC61A':'#3A4855')+'" stroke-width="'+(cur?2.4:1)+'"/>'
+      +'<text x="'+px.toFixed(1)+'" y="'+(py-1).toFixed(1)+'" text-anchor="middle" font-size="12" font-weight="800" fill="#DFE9F2">'+z0.id+'</text>'
+      +(tot?'<text x="'+px.toFixed(1)+'" y="'+(py+12).toFixed(1)+'" text-anchor="middle" font-size="9.5" fill="#9FB2C2">'+asg+'/'+tot+'</text>':'')+'</g>';
+  });
+  sv+='</svg>';
+  $('#mini').innerHTML=sv;
+}
 
 /* ── 배정 조작 ── */
 function canSit(p,s){ return AssignCore.seatAllowed(M,p,s,{}, false) || M.owner[s.key]===p.team; }
@@ -319,6 +432,11 @@ document.addEventListener('drop',e=>{
     DRAGP=null;return;
   }
   if(e.target.closest('.side')){unplace(pid);DRAGP=null;}
+});
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-mz]'); if(!g)return;
+  const dz=g.dataset.mz, first=zidsOf(dz)[0];
+  CURFL=(M.byZone[first].fl==='L')?'1층':'2층'; CURZ=dz; renderAll();
 });
 $('#q') && document.addEventListener('input',e=>{ if(e.target.id==='q'){Q=e.target.value; renderChips();} });
 /* 탭 */
