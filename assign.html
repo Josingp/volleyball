@@ -53,6 +53,8 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 .seat.hov{outline:2px solid var(--sel)}
 .seat.selp{outline:2px solid var(--maple)}
 .seat.flash{outline:3px solid var(--maple);box-shadow:0 0 0 5px rgba(255,198,26,.28)}
+.courtline{margin:6px 0;padding:6px 10px;border-radius:8px;background:linear-gradient(90deg,#3A2E12,#54421A,#3A2E12);color:#FFC61A;font-size:12px;font-weight:800;letter-spacing:.14em;text-align:center;border:1px solid #6B5620}
+.rl i{display:block;font-style:normal;color:#FFC61A;font-size:9.5px;font-weight:800}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--faint);margin-top:8px}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .side h3{font-size:13.5px;margin:2px 0 8px}
@@ -271,43 +273,48 @@ function seatCell(s){
   const tt=s.zid+' '+s.n+'번'+(s.b==='y'?' · 시야제한':'')+(own?' · '+own+' 블록':'')+(p?' · '+p.team+' '+(p.rep||'')+' '+p.name:'');
   return '<span class="'+cls+'"'+sty+' data-k="'+s.key+'" title="'+tt+'"'+(p?' draggable="true"':'')+'>'+label+'</span>';
 }
+/* index(메인 화면) 상세와 동일한 표시 규칙:
+   아래쪽 구역(sec a>180 또는 face N) → 코트가 위, 1열이 맨 윗줄, 좌우 반전
+   그 외 → 코트가 아래, 1열이 맨 아랫줄, 1번 좌석 왼쪽 */
+function vzOf(id){ return (VENJC.zones||[]).find(z=>z.id===id)||{}; }
+function flipUp(vz){ return !!(vz.geo&&(vz.geo.k==='sec'? vz.geo.a>180 : vz.face==='N')); }
+function zoneBlockHTML(zid, opts){
+  opts=opts||{};
+  const zone=M.byZone[zid], vz=vzOf(zid), up=flipUp(vz), flip=!!vz.flip;
+  const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
+  const colAt=dj=>{ if(up){const c0=zone.nC-1-dj; return flip? zone.nC-1-c0 : c0;} return flip? zone.nC-1-dj : dj; };
+  let h='';
+  if(up&&!opts.noCourt) h+='<div class="courtline">▲ 코트 방향 · 1열이 맨 위</div>';
+  for(let di=0;di<zone.nR;di++){
+    const r= up? di : zone.nR-1-di;
+    h+='<div class="row"><span class="rl">'+(r+1)+'열'+(r===0?'<i>코트쪽</i>':'')+'</span>';
+    for(let dj=0;dj<zone.nC;dj++){
+      const st=cell[r+'_'+colAt(dj)];
+      h+= st? seatCell(st) : '<span class="seat gap"></span>';
+    }
+    h+='</div>';
+  }
+  if(!up&&!opts.noCourt) h+='<div class="courtline">▼ 코트 방향 · 1열이 맨 아래</div>';
+  return h;
+}
 function renderKLN(){
-  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 오른쪽이 코트 방향 · 맨 오른쪽 세로줄이 1열(코트쪽)</div>';
-  h+='<div style="display:flex;gap:10px;align-items:stretch"><div style="flex:1;min-width:0">';
+  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 메인 화면 도면과 같은 방향(1열이 코트쪽 아랫줄)</div>';
   zidsOf('KLN1').forEach(zid=>{
     const zone=M.byZone[zid];
-    const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
     const tot=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
     const asg=zone.seats.filter(s=>pidOnSeat[s.key]).length;
     h+='<div class="parthead">'+zid+'<small>'+asg+' / '+tot+'석</small></div>';
-    h+='<div class="colhead">';
-    for(let r=zone.nR-1;r>=0;r--) h+='<span>'+(r+1)+'열'+(r===0?'·코트쪽':'')+'</span>';
-    h+='</div>';
-    for(let c=0;c<zone.nC;c++){
-      h+='<div class="row">';
-      for(let r=zone.nR-1;r>=0;r--){
-        const s=cell[r+'_'+c];
-        h+= s? seatCell(s) : '<span class="seat gap"></span>';
-      }
-      h+='</div>';
-    }
+    h+=zoneBlockHTML(zid,{noCourt:true});
   });
-  h+='</div><div class="courtbar">코트</div></div>';
+  h+='<div class="courtline">▼ 코트 방향 · 각 블록 1열이 맨 아래</div>';
   $('#grid').innerHTML=h;
 }
 function renderGrid(){
   if(CURZ==='KLN1'){renderKLN();return;}
   const zone=M.byZone[CURZ]; if(!zone){$('#grid').innerHTML='';return;}
-  const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
-  let h='<div class="zhead"><b>'+CURZ+'</b> 구역 · 1열이 코트쪽 · 좌석을 클릭/드래그해 이동, 이름을 좌석에 놓아 배정</div>';
-  for(let r=0;r<zone.nR;r++){
-    h+='<div class="row"><span class="rl">'+(r+1)+'열'+(r===0?'(코트쪽)':'')+'</span>';
-    for(let c=0;c<zone.nC;c++){
-      const s=cell[r+'_'+c];
-      h+= s? seatCell(s) : '<span class="seat gap"></span>';
-    }
-    h+='</div>';
-  }
+  const up=flipUp(vzOf(CURZ));
+  let h='<div class="zhead"><b>'+CURZ+'</b> 구역 · 메인 화면 도면과 같은 방향 — 코트가 '+(up?'위':'아래')+'쪽 · 좌석 클릭/드래그로 이동</div>';
+  h+=zoneBlockHTML(CURZ);
   $('#grid').innerHTML=h;
 }
 let Q='';
