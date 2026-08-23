@@ -52,6 +52,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 .seat.asg.y{background:#3A3418;color:#F2E4A0}
 .seat.hov{outline:2px solid var(--sel)}
 .seat.selp{outline:2px solid var(--maple)}
+.seat.flash{outline:3px solid var(--maple);box-shadow:0 0 0 5px rgba(255,198,26,.28)}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--faint);margin-top:8px}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .side h3{font-size:13.5px;margin:2px 0 8px}
@@ -80,6 +81,12 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 #tip{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#0E1A24;border:1px solid #2E4B66;
   color:#CFE6F8;padding:8px 14px;border-radius:10px;font-size:12.5px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:40}
 #tip.on{opacity:1}
+.btn.sm{padding:3px 9px;font-size:11.5px;border-radius:7px}
+.btn.sm.on{border-color:var(--maple);color:var(--maple)}
+#selbar{display:none;margin:0 0 8px;padding:7px 9px;border:1px solid #5C511F;background:#2A2612;border-radius:9px;font-size:12px;color:#E8D98A}
+#selbar .btn{padding:3px 8px;font-size:11px;margin-left:5px}
+.ztab.hov{outline:2px solid var(--sel)}
+#mini g.hov path{stroke:#4DABF7;stroke-width:2.4}
 .bks{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}
 .bk{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:4px 9px;font-size:11.5px;color:var(--mute)}
 .bk i{width:9px;height:9px;border-radius:3px;display:inline-block}
@@ -116,6 +123,10 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
     <button class="btn" id="btnXls">③ 배정결과 엑셀</button>
     <button class="btn" id="btnKyk">③ kyk2 명단 엑셀</button>
     <button class="btn warn" id="btnClr">배정 전체 해제</button>
+    <button class="btn" id="btnUndo" disabled>↶ 되돌리기</button>
+    <button class="btn" id="btnRedo" disabled>↷ 다시하기</button>
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);border:1px dashed var(--line);border-radius:9px;padding:6px 10px">
+      <input type="checkbox" id="okFree"> 자유석 배정 허용 <span style="color:var(--faint);font-size:10.5px">(끄면 대분류 블록에만)</span></label>
     <span class="cnt" id="cnt"></span>
   </div>
 
@@ -137,7 +148,12 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
       <div id="warnbox"></div>
     </div>
     <div class="panel side">
-      <h3>미배정 <b id="left">0</b>명 <span style="font-weight:400;color:var(--faint);font-size:11px">· 드래그: 좌석으로 놓기 / 순서 바꾸기 · 클릭: 선택 후 좌석 클릭</span></h3>
+      <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">미배정 <b id="left">0</b>명
+        <button class="btn sm" id="btnAdd">＋ 추가</button>
+        <button class="btn sm" id="btnMsel" title="켜면 클릭만으로 여러 명 선택">다중선택</button>
+      </h3>
+      <div style="font-size:11px;color:var(--faint);margin:-4px 0 8px">드래그: 좌석·구역 탭·아래 지도에 놓으면 이동 · Ctrl+클릭 = 여러 명 선택 · Ctrl+Z 되돌리기</div>
+      <div id="selbar"></div>
       <input type="search" id="q" placeholder="이름 · 팀 · 대표자 검색">
       <div id="qcnt"></div>
       <div class="chips" id="chips"></div>
@@ -154,7 +170,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 const $=s=>document.querySelector(s);
 let M=null, VENJC=null;                       /* 좌석 모델 */
 let A={roster:[],order:[],seats:{},updatedAt:0};   /* 배정 상태(공유 저장) */
-let CURFL='1층', CURZ=null, SELP=null, DRAGP=null;
+let CURFL='1층', CURZ=null;
 const COMBO={KLN1:['K1','L1','N1']};                 /* 한 파트로 묶어 보는 구역 */
 const IN_COMBO={K1:'KLN1',L1:'KLN1',N1:'KLN1'};
 function dispZones(fl){
@@ -197,11 +213,12 @@ async function boot(){
   M=AssignCore.buildModel(VENJC, rsv);
   A.roster=A.roster||[]; A.order=A.order||A.roster.map(p=>p.id); A.seats=A.seats||{};
   CURZ=dispZones('1층')[0];
+  const of=$('#okFree'); if(of){of.checked=!!A.allowFree; of.onchange=()=>{A.allowFree=of.checked;save();};}
   renderAll();
   if(shared) setInterval(poll,15000);
 }
 async function poll(){
-  if(DRAGP||SELP||Date.now()-lastLocal<10000) return;
+  if(DRAG.length||SEL.size||Date.now()-lastLocal<10000) return;
   try{const r=await fetch('api/state',{cache:'no-store'}); if(!r.ok)return;
     const o=await r.json(); const jc=o&&o.venues&&o.venues.jc;
     if(jc&&jc.assign&&jc.assign.updatedAt>(A.updatedAt||0)){ STATE=o; A=jc.assign; renderAll(); }
@@ -230,7 +247,7 @@ function save(){
 const pidOnSeat={};
 function rebuildSeatIdx(){ for(const k in pidOnSeat)delete pidOnSeat[k]; for(const pid in A.seats)pidOnSeat[A.seats[pid]]=pid; }
 function byId(id){ return A.roster.find(p=>p.id===id); }
-function renderAll(){ rebuildSeatIdx(); renderTabs(); renderGrid(); renderChips(); renderCnt(); renderBlk(); renderMini(); }
+function renderAll(){ rebuildSeatIdx(); renderTabs(); renderGrid(); renderChips(); renderCnt(); renderBlk(); renderMini(); renderSelbar(); }
 function renderTabs(){
   $('#fltabs').innerHTML=['1층','2층'].map(f=>'<button class="ztab'+(f===CURFL?' on':'')+'" data-fl="'+f+'">'+f+'</button>').join('');
   $('#ztabs').innerHTML=dispZones(CURFL).map(dz=>{
@@ -245,7 +262,7 @@ function renderTabs(){
 function seatCell(s){
   const pid=pidOnSeat[s.key], p=pid&&byId(pid);
   const own=M.owner[s.key];
-  let cls='seat '+s.b+(p?' asg':'')+(own?' blk':'')+(SELP&&pid===SELP?' selp':'');
+  let cls='seat '+s.b+(p?' asg':'')+(own?' blk':'')+(pid&&SEL.has(pid)?' selp':'');
   let sty=own?' style="--bcol:'+(teamCol[own]||'#556')+'"':'';
   let label;
   if(p){ const rp=p.rep||p.team;
@@ -305,12 +322,25 @@ function renderChips(){
   const groups=[]; const gi={};
   vis.forEach(p=>{const gk=p.team+' · '+(p.rep||'-');
     if(gi[gk]==null){gi[gk]=groups.length;groups.push({gk,list:[]});} groups[gi[gk]].list.push(p);});
-  $('#chips').innerHTML=groups.map(g=>'<div class="ghead">'+esc(g.gk)+' <span style="float:right">'+g.list.length+'명</span></div>'
-    +g.list.map(p=>chipHTML(p)).join('')).join('')
-    ||'<div style="color:var(--faint);font-size:12.5px">'+(q?'검색 결과가 없습니다':'모두 배정되었습니다 🎉')+'</div>';
+  let html=groups.map(g=>'<div class="ghead">'+esc(g.gk)+' <span style="float:right">'+g.list.length+'명</span></div>'
+    +g.list.map(p=>chipHTML(p)).join('')).join('');
+  if(q){
+    const asg=A.order.map(byId).filter(p=>p&&A.seats[p.id]&&(p.name+' '+p.team+' '+p.rep).toLowerCase().indexOf(q)>=0);
+    if(asg.length){
+      html+='<div class="ghead" style="color:#7FCF8B">배정됨 '+asg.length+'명 · 누르면 좌석으로 이동</div>'
+        +asg.map(p=>{const st=M.seatsByKey[A.seats[p.id]];
+          return '<div class="chip" draggable="true" data-p="'+p.id+'" data-asg="1">'
+           +'<span class="nm">'+esc(p.name)+'</span>'
+           +'<span style="color:#7FCF8B;font-size:11.5px;font-weight:700">'+st.zid+' '+st.n+'번</span>'
+           +'<span style="color:var(--faint);font-size:10.5px">'+esc(p.team)+(p.rep?' · '+esc(p.rep):'')+'</span>'
+           +'<span class="tags"><span class="tg">이동↗</span></span></div>';}).join('');
+    }
+    if(!vis.length&&!asg.length) html='<div style="color:var(--faint);font-size:12.5px">검색 결과가 없습니다</div>';
+  } else if(!html) html='<div style="color:var(--faint);font-size:12.5px">모두 배정되었습니다 🎉</div>';
+  $('#chips').innerHTML=html;
 }
 function chipHTML(p){
-  return '<div class="chip'+(SELP===p.id?' selp':'')+'" draggable="true" data-p="'+p.id+'">'
+  return '<div class="chip'+(SEL.has(p.id)?' selp':'')+'" draggable="true" data-p="'+p.id+'">'
     +'<span class="nm">'+esc(p.name)+'</span>'
     +'<span style="color:var(--faint);font-size:11px">'+esc(p.fl||'층무관')+(p.zones.length?' '+p.zones.join(','):'')+'</span>'
     +'<span class="tags">'+(p.vip?'<span class="tg vip">VIP</span>':'')+(p.con?'<span class="tg con">연석</span>':'')+(p.okY?'<span class="tg y">시야OK</span>':'')+'</span>'
@@ -379,70 +409,200 @@ function renderMini(){
   $('#mini').innerHTML=sv;
 }
 
-/* ── 배정 조작 ── */
-function canSit(p,s){ return AssignCore.seatAllowed(M,p,s,{}, false) || M.owner[s.key]===p.team; }
-function place(pid,key){
-  const p=byId(pid), s=M.seatsByKey[key]; if(!p||!s)return;
-  if(s.b==='x'||s.b==='c'){tip('사석·카메라석에는 배정할 수 없습니다');return;}
-  if(s.b==='y'&&!p.okY){tip(p.name+'님은 시야제한석 불가 설정입니다 — 옵션(✎)에서 허용으로 바꾸면 가능');return;}
-  const own=M.owner[key]; if(own&&own!==p.team){tip('이 좌석은 '+own+' 지정블록입니다');return;}
-  const occ=pidOnSeat[key];
-  const prev=A.seats[pid];
-  if(occ&&occ!==pid){ if(prev){A.seats[occ]=prev;} else {delete A.seats[occ];} }  /* 자리 바꿈/밀어내기 */
-  A.seats[pid]=key;
-  SELP=null; save(); renderAll();
+/* ── 배정 조작 · 선택 · 되돌리기 ── */
+const UNDO=[],REDO=[]; let SEL=new Set(), MSEL=false;
+function snap(){return JSON.stringify({roster:A.roster,order:A.order,seats:A.seats});}
+function restore(j){const o=JSON.parse(j);A.roster=o.roster;A.order=o.order;A.seats=o.seats;}
+function updUR(){$('#btnUndo').disabled=!UNDO.length;$('#btnRedo').disabled=!REDO.length;}
+function pushUndo(){UNDO.push(snap());if(UNDO.length>60)UNDO.shift();REDO.length=0;updUR();}
+function doUndo(){if(!UNDO.length)return;REDO.push(snap());restore(UNDO.pop());SEL.clear();save();renderAll();updUR();tip('되돌렸습니다');}
+function doRedo(){if(!REDO.length)return;UNDO.push(snap());restore(REDO.pop());SEL.clear();save();renderAll();updUR();tip('다시 실행');}
+$('#btnUndo').onclick=doUndo; $('#btnRedo').onclick=doRedo;
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?doRedo():doUndo();}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();doRedo();}
+  if(e.key==='Escape'){SEL.clear();renderAll();}
+});
+function selOrdered(){return A.order.filter(id=>SEL.has(id));}
+function toggleSel(pid,add){
+  if(add){SEL.has(pid)?SEL.delete(pid):SEL.add(pid);}
+  else{ if(SEL.size===1&&SEL.has(pid))SEL.clear(); else{SEL.clear();SEL.add(pid);} }
+  renderAll();
 }
-function unplace(pid){ if(A.seats[pid]){delete A.seats[pid]; save(); renderAll();} }
-
-/* 클릭 흐름: 칩/배정좌석 클릭=선택 → 좌석 클릭=이동 */
+function seatJump(pid){
+  const key=A.seats[pid]; if(!key)return;
+  const st=M.seatsByKey[key], dz=IN_COMBO[st.zid]||st.zid;
+  CURFL=(M.byZone[st.zid].fl==='L')?'1층':'2층'; CURZ=dz;
+  SEL.clear(); SEL.add(pid); renderAll();
+  const el=document.querySelector('.seat[data-k="'+key+'"]');
+  if(el){ el.classList.add('flash'); el.scrollIntoView({block:'center',inline:'center',behavior:'smooth'});
+    setTimeout(()=>el.classList.remove('flash'),2500); }
+  tip(byId(pid).name+' — '+st.zid+' 구역 '+st.n+'번');
+}
+function renderSelbar(){
+  const n=SEL.size,b=$('#selbar'); if(!b)return;
+  if(!n){b.style.display='none';b.innerHTML='';return;}
+  b.style.display='block';
+  b.innerHTML='<b>'+n+'명 선택</b> — 좌석·구역 탭·지도에 드래그(또는 빈 좌석 클릭)하면 함께 이동'
+   +'<button class="btn" id="selUn">배정 해제</button><button class="btn" id="selDel">삭제</button><button class="btn" id="selX">선택 해제</button>';
+}
+function personAllowed(p,st,takenMap){
+  if(takenMap[st.key])return false;
+  if(st.b==='x'||st.b==='c')return false;
+  if(st.b==='y'&&!p.okY)return false;
+  const own=M.owner[st.key]; if(own&&!AssignCore.teamMatchesBlock(p.team,own))return false;
+  return true;
+}
+function place(pid,key){
+  const p=byId(pid), st=M.seatsByKey[key]; if(!p||!st)return;
+  if(st.b==='x'||st.b==='c'){tip('사석·카메라석에는 배정할 수 없습니다');return;}
+  if(st.b==='y'&&!p.okY){tip(p.name+'님은 시야제한석 불가 설정입니다 — ✎ 옵션에서 허용으로 바꾸면 가능');return;}
+  const own=M.owner[key]; if(own&&!AssignCore.teamMatchesBlock(p.team,own)){tip('이 좌석은 '+own+' 지정블록입니다');return;}
+  pushUndo();
+  const occ=pidOnSeat[key], prev=A.seats[pid];
+  if(occ&&occ!==pid){ if(prev){A.seats[occ]=prev;} else {delete A.seats[occ];} }
+  A.seats[pid]=key;
+  SEL.clear(); save(); renderAll();
+}
+function unplace(pid){ if(A.seats[pid]){pushUndo();delete A.seats[pid];save();renderAll();} }
+/* 여러 명: 지정 좌석부터 이어 앉히기 */
+function groupPlaceAt(pids,anchorKey){
+  const anchor=M.seatsByKey[anchorKey]; if(!anchor)return;
+  pushUndo();
+  const zone=M.byZone[anchor.zid];
+  const taken={}; for(const id in A.seats){ if(pids.indexOf(id)<0) taken[A.seats[id]]=id; }
+  pids.forEach(id=>{delete A.seats[id];});
+  const rows={}; zone.seats.forEach(x=>{(rows[x.r]=rows[x.r]||[]).push(x);});
+  Object.values(rows).forEach(a=>a.sort((x,y)=>x.c-y.c));
+  const seq=[];
+  (rows[anchor.r]||[]).forEach(x=>{if(x.c>=anchor.c)seq.push(x);});
+  for(let r=anchor.r+1;r<zone.nR;r++)(rows[r]||[]).forEach(x=>seq.push(x));
+  for(let r=anchor.r-1;r>=0;r--)(rows[r]||[]).forEach(x=>seq.push(x));
+  (rows[anchor.r]||[]).forEach(x=>{if(x.c<anchor.c)seq.push(x);});
+  let miss=0,si=0;
+  pids.forEach(id=>{
+    const p=byId(id); if(!p){miss++;return;}
+    while(si<seq.length&&!personAllowed(p,seq[si],taken))si++;
+    if(si<seq.length){A.seats[id]=seq[si].key;taken[seq[si].key]=id;si++;}
+    else miss++;
+  });
+  SEL.clear(); save(); renderAll();
+  tip(miss? miss+'명은 이 구역에 자리가 부족해 미배정으로 남았습니다':'그룹 이동 완료 ('+pids.length+'명)');
+}
+/* 여러 명: 다른 구역으로 통째 이동(연석 로직 재사용) */
+function groupMoveToZone(pids,dz){
+  const zids=zidsOf(dz);
+  pushUndo();
+  const ps=pids.map(byId).filter(Boolean);
+  const uniform=ps.length&&ps.every(p=>p.team===ps[0].team);
+  const clones=ps.map(p=>Object.assign({},p,{team:uniform?p.team:'',rep:'__그룹__',con:true,vip:false,fl:'',zones:zids}));
+  const others={}; for(const id in A.seats){ if(pids.indexOf(id)<0) others[id]=A.seats[id]; }
+  const seats0={}; for(const id in others)seats0[id]=others[id];
+  const res=AssignCore.autoAssign(M,clones,pids.slice(),seats0,{allowFree:$('#okFree').checked});
+  pids.forEach(id=>{delete A.seats[id];});
+  let done=0;
+  pids.forEach(id=>{ if(res.seatOf[id]){A.seats[id]=res.seatOf[id];done++;} });
+  SEL.clear(); save(); renderAll();
+  const wb=$('#warnbox');
+  if(pids.length-done>0){wb.style.display='block';wb.textContent='⚠ '+dz+' 구역 자리 부족 — '+(pids.length-done)+'명 미배정';}
+  tip(dz+'(으)로 '+done+'/'+pids.length+'명 이동');
+}
+/* 클릭: 선택 → 배정/이동 */
 document.addEventListener('click',e=>{
   const ed=e.target.closest('[data-ed]'); if(ed){openEdit(ed.dataset.ed,e);return;}
-  const chip=e.target.closest('.chip'); if(chip){SELP=(SELP===chip.dataset.p)?null:chip.dataset.p; renderAll(); return;}
+  if(e.target.closest('#btnAdd')){openAdd(e);return;}
+  if(e.target.closest('#btnMsel')){MSEL=!MSEL;$('#btnMsel').classList.toggle('on',MSEL);tip(MSEL?'다중선택 모드: 클릭할 때마다 선택에 추가됩니다':'다중선택 해제');return;}
+  if(e.target.closest('#selX')){SEL.clear();renderAll();return;}
+  if(e.target.closest('#selUn')){const ids=selOrdered().filter(id=>A.seats[id]); if(ids.length){pushUndo();ids.forEach(id=>delete A.seats[id]);} SEL.clear();save();renderAll();return;}
+  if(e.target.closest('#selDel')){const ids=selOrdered(); if(!ids.length)return;
+    if(!confirm(ids.length+'명을 명단에서 삭제할까요?'))return;
+    pushUndo(); ids.forEach(id=>{delete A.seats[id];}); A.roster=A.roster.filter(p=>ids.indexOf(p.id)<0); A.order=A.order.filter(id=>ids.indexOf(id)<0);
+    SEL.clear();save();renderAll();return;}
+  const mz=e.target.closest('[data-mz]');
+  if(mz){
+    if(SEL.size){groupMoveToZone(selOrdered(),mz.dataset.mz);return;}
+    const dz=mz.dataset.mz, first=zidsOf(dz)[0];
+    CURFL=(M.byZone[first].fl==='L')?'1층':'2층'; CURZ=dz; renderAll(); return;
+  }
+  const chip=e.target.closest('.chip');
+  if(chip){ if(chip.dataset.asg){seatJump(chip.dataset.p);return;} toggleSel(chip.dataset.p,e.ctrlKey||e.metaKey||MSEL);return;}
   const st=e.target.closest('.seat[data-k]');
   if(st){
     const key=st.dataset.k, occ=pidOnSeat[key];
-    if(SELP){ place(SELP,key); return; }
-    if(occ){ SELP=occ; renderAll(); tip(byId(occ).name+' 선택됨 — 옮길 좌석을 클릭하거나, 미배정으로 빼려면 오른쪽 패널로 드래그'); }
+    if(occ&&(e.ctrlKey||e.metaKey||MSEL)){toggleSel(occ,true);return;}
+    if(SEL.size>1){groupPlaceAt(selOrdered(),key);return;}
+    if(SEL.size===1){place(selOrdered()[0],key);return;}
+    if(occ){toggleSel(occ,false);tip(byId(occ).name+' 선택됨 — 옮길 좌석을 클릭 (Ctrl+클릭으로 여러 명 선택)');}
     return;
   }
   if(!e.target.closest('#editbox')) closeEdit();
 });
-/* 드래그 */
+/* 드래그: 선택된 여러 명이면 함께 이동 */
+let DRAG=[];
 document.addEventListener('dragstart',e=>{
   const chip=e.target.closest('.chip'); const st=e.target.closest('.seat.asg');
-  if(chip){DRAGP=chip.dataset.p;e.dataTransfer.setData('text/plain',DRAGP);}
-  else if(st){DRAGP=pidOnSeat[st.dataset.k];e.dataTransfer.setData('text/plain',DRAGP);}
+  const pid=chip?chip.dataset.p:(st?pidOnSeat[st.dataset.k]:null);
+  if(!pid)return;
+  DRAG=(SEL.has(pid)&&SEL.size>1)?selOrdered():[pid];
+  try{e.dataTransfer.setData('text/plain',DRAG.join(','));}catch(x){}
+  if(DRAG.length>1)tip(DRAG.length+'명 함께 이동 중 — 좌석·구역 탭·지도에 놓으세요');
 });
-document.addEventListener('dragend',()=>{DRAGP=null;document.querySelectorAll('.hov').forEach(x=>x.classList.remove('hov'));});
+document.addEventListener('dragend',()=>{DRAG=[];document.querySelectorAll('.hov').forEach(x=>x.classList.remove('hov'));});
 document.addEventListener('dragover',e=>{
-  const st=e.target.closest('.seat[data-k]'); const chip=e.target.closest('.chip'); const panel=e.target.closest('.side');
-  if((st&&DRAGP)||(chip&&DRAGP)||(panel&&DRAGP)){e.preventDefault();
+  if(!DRAG.length)return;
+  const t=e.target.closest('.seat[data-k], .chip, .side, .ztab[data-z], #mini [data-mz]');
+  if(t){e.preventDefault();
     document.querySelectorAll('.hov').forEach(x=>x.classList.remove('hov'));
-    if(st)st.classList.add('hov');}
+    if(!t.classList.contains('side'))t.classList.add('hov');}
 });
 document.addEventListener('drop',e=>{
   e.preventDefault();
-  const pid=DRAGP||e.dataTransfer.getData('text/plain'); if(!pid)return;
+  if(!DRAG.length){const dt=e.dataTransfer.getData('text/plain'); if(dt)DRAG=dt.split(',');}
+  if(!DRAG.length)return;
+  const pids=DRAG.slice(); DRAG=[];
   const st=e.target.closest('.seat[data-k]');
-  if(st){place(pid,st.dataset.k);DRAGP=null;return;}
+  if(st){ pids.length>1? groupPlaceAt(pids,st.dataset.k) : place(pids[0],st.dataset.k); return; }
+  const zt=e.target.closest('.ztab[data-z]')||e.target.closest('#mini [data-mz]');
+  if(zt){ groupMoveToZone(pids, zt.dataset.z||zt.dataset.mz); return; }
   const chip=e.target.closest('.chip');
-  if(chip&&chip.dataset.p!==pid){                     /* 큐 순서 변경 */
-    const from=A.order.indexOf(pid), to=A.order.indexOf(chip.dataset.p);
-    if(from>=0&&to>=0){A.order.splice(from,1);A.order.splice(to,0,pid);save();renderChips();}
-    DRAGP=null;return;
+  if(chip&&pids.length===1&&chip.dataset.p!==pids[0]){
+    const from=A.order.indexOf(pids[0]), to=A.order.indexOf(chip.dataset.p);
+    if(from>=0&&to>=0){pushUndo();A.order.splice(from,1);A.order.splice(to,0,pids[0]);save();renderChips();}
+    return;
   }
-  if(e.target.closest('.side')){unplace(pid);DRAGP=null;}
+  if(e.target.closest('.side')){ const ids=pids.filter(id=>A.seats[id]); if(ids.length){pushUndo();ids.forEach(id=>delete A.seats[id]);save();} SEL.clear(); renderAll(); }
 });
-document.addEventListener('click',e=>{
-  const g=e.target.closest('[data-mz]'); if(!g)return;
-  const dz=g.dataset.mz, first=zidsOf(dz)[0];
-  CURFL=(M.byZone[first].fl==='L')?'1층':'2층'; CURZ=dz; renderAll();
-});
-$('#q') && document.addEventListener('input',e=>{ if(e.target.id==='q'){Q=e.target.value; renderChips();} });
+document.addEventListener('input',e=>{ if(e.target.id==='q'){Q=e.target.value; renderChips();} });
 /* 탭 */
-$('#fltabs').addEventListener('click',e=>{const b=e.target.closest('[data-fl]');if(!b)return;CURFL=b.dataset.fl;CURZ=M.floors[CURFL][0];renderAll();});
+$('#fltabs').addEventListener('click',e=>{const b=e.target.closest('[data-fl]');if(!b)return;CURFL=b.dataset.fl;CURZ=dispZones(CURFL)[0];renderAll();});
 $('#ztabs').addEventListener('click',e=>{const b=e.target.closest('[data-z]');if(!b)return;CURZ=b.dataset.z;renderTabs();renderGrid();});
-
+/* 명단 직접 추가 */
+function openAdd(e){
+  const bx=$('#editbox');
+  bx.innerHTML='<div style="font-weight:700;margin-bottom:4px">명단 추가</div>'
+   +'<label>팀 <input type="text" id="a_t" placeholder="예: MBC"></label>'
+   +'<label>대표자 <input type="text" id="a_r"></label>'
+   +'<label>이름 <input type="text" id="a_n"></label>'
+   +'<label>연락처 <input type="text" id="a_ph" placeholder="선택"></label>'
+   +'<label>층수 <select id="a_fl"><option value="">무관</option><option>1층</option><option>2층</option></select>'
+   +' 구역 <input type="text" id="a_z" style="width:90px" placeholder="H1,I1"></label>'
+   +'<label><input type="checkbox" id="a_con" checked> 연석 <input type="checkbox" id="a_vip"> VIP <input type="checkbox" id="a_y"> 시야OK</label>'
+   +'<div style="display:flex;gap:6px;margin-top:8px"><button class="btn acc" id="a_ok">추가</button><button class="btn" id="a_x">닫기</button></div>'
+   +'<div style="font-size:10.5px;color:var(--faint);margin-top:5px">추가 후에도 창이 유지되어 같은 팀을 연달아 입력할 수 있습니다</div>';
+  bx.style.display='block';
+  const r=e.target.getBoundingClientRect();
+  bx.style.left=Math.min(window.innerWidth-290,Math.max(8,r.left-120))+'px'; bx.style.top=Math.min(window.innerHeight-320,r.bottom+8)+'px';
+  $('#a_ok').onclick=()=>{
+    const nm=$('#a_n').value.trim(); if(!nm){tip('이름을 입력하세요');return;}
+    pushUndo();
+    const p=AssignCore.makePerson({'팀':$('#a_t').value,'대표자명':$('#a_r').value,'참석자 이름':nm,'연락처':$('#a_ph').value,
+      '층수':$('#a_fl').value,'구역지정':$('#a_z').value,'연석여부':$('#a_con').checked?'O':'X',
+      'VIP 여부':$('#a_vip').checked?'O':'X','시야제한석 가능':$('#a_y').checked?'O':'X'},M);
+    A.roster.push(p); A.order.push(p.id);
+    save(); renderAll(); $('#a_n').value=''; $('#a_n').focus(); tip(nm+' 추가됨');
+  };
+  $('#a_x').onclick=closeEdit;
+}
 /* ── 옵션 수정 ── */
 function openEdit(pid,e){
   const p=byId(pid); if(!p)return;
@@ -459,11 +619,13 @@ function openEdit(pid,e){
   const r=e.target.getBoundingClientRect();
   bx.style.left=Math.min(window.innerWidth-290,r.left-140)+'px'; bx.style.top=Math.min(window.innerHeight-260,r.bottom+8)+'px';
   $('#e_ok').onclick=()=>{
+    pushUndo();
     const upd=q=>{q.fl=$('#e_fl').value;q.zones=AssignCore.parseZones($('#e_z').value,M);q.con=$('#e_con').checked;q.vip=$('#e_vip').checked;q.okY=$('#e_y').checked;};
     if($('#e_grp').checked) A.roster.filter(q=>q.team===p.team&&q.rep===p.rep).forEach(upd); else upd(p);
     closeEdit();save();renderAll();
   };
   $('#e_del').onclick=()=>{ if(!confirm(p.name+' 삭제?'))return;
+    pushUndo();
     delete A.seats[p.id]; A.roster=A.roster.filter(q=>q.id!==p.id); A.order=A.order.filter(id=>id!==p.id);
     closeEdit();save();renderAll(); };
   $('#e_x').onclick=closeEdit;
@@ -480,6 +642,7 @@ $('#file').addEventListener('change',async e=>{
   const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
   if(!rows.length){tip('행이 없습니다');return;}
   if(A.roster.length && !confirm('기존 명단 '+A.roster.length+'명을 지우고 새 명단으로 바꿀까요? (배정도 초기화)')) return;
+  pushUndo();
   A.roster=[];A.order=[];A.seats={};
   let phone='';
   rows.forEach(r0=>{
@@ -508,14 +671,15 @@ $('#btnTpl').onclick=()=>{
 };
 $('#btnAuto').onclick=()=>{
   if(!A.roster.length){tip('먼저 명단을 업로드하세요');return;}
-  const {seatOf,warnings}=AssignCore.autoAssign(M,A.roster,A.order,A.seats);
+  pushUndo();
+  const {seatOf,warnings}=AssignCore.autoAssign(M,A.roster,A.order,A.seats,{allowFree:$('#okFree').checked});
   A.seats=seatOf; save(); renderAll();
   const wb=$('#warnbox');
   if(warnings.length){wb.style.display='block';wb.textContent='⚠ '+warnings.join('\n⚠ ');}
   else{wb.style.display='none';}
   tip('자동 배정 완료 — 미배정 '+A.order.filter(id=>!A.seats[id]).length+'명');
 };
-$('#btnClr').onclick=()=>{ if(!confirm('모든 배정을 해제할까요? (명단은 유지)'))return; A.seats={};save();renderAll(); };
+$('#btnClr').onclick=()=>{ if(!confirm('모든 배정을 해제할까요? (명단은 유지)'))return; pushUndo(); A.seats={};save();renderAll(); };
 function assignedRows(){
   return A.order.map(byId).filter(p=>p&&A.seats[p.id]).map(p=>{const s=M.seatsByKey[A.seats[p.id]];return {p,s};})
     .sort((a,b)=>a.p.team.localeCompare(b.p.team)||a.p.rep.localeCompare(b.p.rep)||a.s.zid.localeCompare(b.s.zid)||a.s.n-b.s.n);
@@ -536,7 +700,7 @@ $('#btnKyk').onclick=()=>{
   XLSX.writeFile(wb,'kyk2_초대명단_업로드용.xlsx');
   tip('kyk2-ticket 관리자 화면 → 명단 업로드에 이 파일을 그대로 올리면 됩니다');
 };
-window.__assign={get A(){return A;},get M(){return M;},place,unplace,renderAll,save:()=>{}};  /* 테스트 훅(저장 무력화는 테스트에서 교체) */
+window.__assign={get A(){return A;},get M(){return M;},get SEL(){return SEL;},place,unplace,groupPlaceAt,groupMoveToZone,doUndo,doRedo,toggleSel,renderAll};  /* 테스트 훅(저장 무력화는 테스트에서 교체) */
 boot();
 </script>
 </body>
