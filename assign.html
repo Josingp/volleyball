@@ -128,7 +128,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
     <button class="btn" id="btnUndo" disabled>↶ 되돌리기</button>
     <button class="btn" id="btnRedo" disabled>↷ 다시하기</button>
     <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);border:1px dashed var(--line);border-radius:9px;padding:6px 10px">
-      <input type="checkbox" id="okFree"> 자유석 배정 허용 <span style="color:var(--faint);font-size:10.5px">(끄면 대분류 블록에만)</span></label>
+      <input type="checkbox" id="okFree"> 자유석 배정 허용 <span style="color:var(--faint);font-size:10.5px">(블록을 다 채운 뒤 최후 수단 · 끄면 블록에만)</span></label>
     <span class="cnt" id="cnt"></span>
   </div>
 
@@ -166,7 +166,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 <div id="editbox"></div>
 <div id="tip"></div>
 <script src="assets/xlsx.full.min.js"></script>
-<script src="assets/assign-core.js"></script>
+<script src="assets/assign-core.js?v=2"></script>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -298,15 +298,27 @@ function zoneBlockHTML(zid, opts){
   return h;
 }
 function renderKLN(){
-  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 메인 화면 도면과 같은 방향(1열이 코트쪽 아랫줄)</div>';
+  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 오른쪽이 코트 방향 · 맨 오른쪽 세로줄이 1열(코트쪽)</div>';
+  h+='<div style="display:flex;gap:10px;align-items:stretch"><div style="flex:1;min-width:0">';
   zidsOf('KLN1').forEach(zid=>{
     const zone=M.byZone[zid];
+    const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
     const tot=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
     const asg=zone.seats.filter(s=>pidOnSeat[s.key]).length;
     h+='<div class="parthead">'+zid+'<small>'+asg+' / '+tot+'석</small></div>';
-    h+=zoneBlockHTML(zid,{noCourt:true});
+    h+='<div class="colhead">';
+    for(let r=zone.nR-1;r>=0;r--) h+='<span>'+(r+1)+'열'+(r===0?'·코트쪽':'')+'</span>';
+    h+='</div>';
+    for(let c=0;c<zone.nC;c++){
+      h+='<div class="row">';
+      for(let r=zone.nR-1;r>=0;r--){
+        const s=cell[r+'_'+c];
+        h+= s? seatCell(s) : '<span class="seat gap"></span>';
+      }
+      h+='</div>';
+    }
   });
-  h+='<div class="courtline">▼ 코트 방향 · 각 블록 1열이 맨 아래</div>';
+  h+='</div><div class="courtbar">코트</div></div>';
   $('#grid').innerHTML=h;
 }
 function renderGrid(){
@@ -679,10 +691,27 @@ $('#btnTpl').onclick=()=>{
 $('#btnAuto').onclick=()=>{
   if(!A.roster.length){tip('먼저 명단을 업로드하세요');return;}
   pushUndo();
+  /* 자유석 오배치 정리: 팀 블록이 있는 구역을 지정받았는데 자유석에 앉은 인원은
+     확인 후 해제하고 블록으로 재배정 — 자유석 구역을 지정받은 인원(스태프 등)은 건드리지 않음 */
+  const mis=[];
+  for(const pid in A.seats){
+    const key=A.seats[pid]; if(M.owner[key])continue;
+    const p=byId(pid); if(!p||!p.team)continue;
+    const zs=AssignCore.prefZoneIds(M,p);
+    const hasBlk=zs.some(z=>{const zn=M.byZone[z];
+      return zn&&zn.seats.some(s=>{const o=M.owner[s.key];return o&&AssignCore.teamMatchesBlock(p.team,o);});});
+    if(hasBlk)mis.push(pid);
+  }
+  if(mis.length&&confirm('자유석에 앉아 있는 '+mis.length+'명은 팀 블록이 있는 구역을 지정받은 인원입니다.\n해제하고 팀 블록으로 다시 배정할까요?\n\n(블록 자리가 부족하면 미배정으로 남습니다 · [취소]하면 지금 자리 그대로 둡니다)')){
+    mis.forEach(id=>{delete A.seats[id];});
+  }
   const {seatOf,warnings}=AssignCore.autoAssign(M,A.roster,A.order,A.seats,{allowFree:$('#okFree').checked});
   A.seats=seatOf; save(); renderAll();
   const wb=$('#warnbox');
-  if(warnings.length){wb.style.display='block';wb.textContent='⚠ '+warnings.join('\n⚠ ');}
+  if(warnings.length){
+    const cnt={},ord=[]; warnings.forEach(w=>{if(cnt[w]==null){cnt[w]=0;ord.push(w);}cnt[w]++;});
+    wb.style.display='block';wb.textContent='⚠ '+ord.map(w=>w+(cnt[w]>1?'  ×'+cnt[w]:'')).join('\n⚠ ');
+  }
   else{wb.style.display='none';}
   tip('자동 배정 완료 — 미배정 '+A.order.filter(id=>!A.seats[id]).length+'명');
 };
