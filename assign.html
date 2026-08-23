@@ -128,7 +128,7 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
     <button class="btn" id="btnUndo" disabled>↶ 되돌리기</button>
     <button class="btn" id="btnRedo" disabled>↷ 다시하기</button>
     <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--mute);border:1px dashed var(--line);border-radius:9px;padding:6px 10px">
-      <input type="checkbox" id="okFree"> 자유석 배정 허용 <span style="color:var(--faint);font-size:10.5px">(블록을 다 채운 뒤 최후 수단 · 끄면 블록에만)</span></label>
+      <input type="checkbox" id="okFree"> 자유석 배정 허용 <span style="color:var(--faint);font-size:10.5px">(끄면 대분류 블록에만)</span></label>
     <span class="cnt" id="cnt"></span>
   </div>
 
@@ -165,8 +165,8 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 
 <div id="editbox"></div>
 <div id="tip"></div>
-<script src="assets/xlsx.full.min.js"></script>
-<script src="assets/assign-core.js?v=2"></script>
+<script src="assets/xlsx.full.min.js?v=260823o"></script>
+<script src="assets/assign-core.js?v=260823o"></script>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -298,27 +298,15 @@ function zoneBlockHTML(zid, opts){
   return h;
 }
 function renderKLN(){
-  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 오른쪽이 코트 방향 · 맨 오른쪽 세로줄이 1열(코트쪽)</div>';
-  h+='<div style="display:flex;gap:10px;align-items:stretch"><div style="flex:1;min-width:0">';
+  let h='<div class="zhead"><b>K1 · L1 · N1</b> 한 파트 보기 · 메인 화면 도면과 같은 방향(1열이 코트쪽 아랫줄)</div>';
   zidsOf('KLN1').forEach(zid=>{
     const zone=M.byZone[zid];
-    const cell={}; zone.seats.forEach(s=>cell[s.r+'_'+s.c]=s);
     const tot=zone.seats.filter(s=>s.b==='o'||s.b==='y').length;
     const asg=zone.seats.filter(s=>pidOnSeat[s.key]).length;
     h+='<div class="parthead">'+zid+'<small>'+asg+' / '+tot+'석</small></div>';
-    h+='<div class="colhead">';
-    for(let r=zone.nR-1;r>=0;r--) h+='<span>'+(r+1)+'열'+(r===0?'·코트쪽':'')+'</span>';
-    h+='</div>';
-    for(let c=0;c<zone.nC;c++){
-      h+='<div class="row">';
-      for(let r=zone.nR-1;r>=0;r--){
-        const s=cell[r+'_'+c];
-        h+= s? seatCell(s) : '<span class="seat gap"></span>';
-      }
-      h+='</div>';
-    }
+    h+=zoneBlockHTML(zid,{noCourt:true});
   });
-  h+='</div><div class="courtbar">코트</div></div>';
+  h+='<div class="courtline">▼ 코트 방향 · 각 블록 1열이 맨 아래</div>';
   $('#grid').innerHTML=h;
 }
 function renderGrid(){
@@ -517,14 +505,20 @@ function groupMoveToZone(pids,dz){
   const clones=ps.map(p=>Object.assign({},p,{team:uniform?p.team:'',rep:'__그룹__',con:true,vip:false,fl:'',zones:zids}));
   const others={}; for(const id in A.seats){ if(pids.indexOf(id)<0) others[id]=A.seats[id]; }
   const seats0={}; for(const id in others)seats0[id]=others[id];
-  const res=AssignCore.autoAssign(M,clones,pids.slice(),seats0,{allowFree:$('#okFree').checked});
+  const prev={}; pids.forEach(id=>{prev[id]=A.seats[id];});
+  const res=AssignCore.autoAssign(M,clones,pids.slice(),seats0,{allowFree:$('#okFree').checked,pin:true});
   pids.forEach(id=>{delete A.seats[id];});
   let done=0;
   pids.forEach(id=>{ if(res.seatOf[id]){A.seats[id]=res.seatOf[id];done++;} });
+  if(done===0){                                     /* 그 구역에 함께 못 앉으면 이동 취소(원위치) */
+    pids.forEach(id=>{ if(prev[id])A.seats[id]=prev[id]; });
+    SEL.clear(); renderAll();
+    tip(dz+' 구역에 '+pids.length+'명이 붙어 앉을 자리가 없어 이동하지 않았습니다');
+    UNDO.pop(); updUR();
+    return;
+  }
   SEL.clear(); save(); renderAll();
-  const wb=$('#warnbox');
-  if(pids.length-done>0){wb.style.display='block';wb.textContent='⚠ '+dz+' 구역 자리 부족 — '+(pids.length-done)+'명 미배정';}
-  tip(dz+'(으)로 '+done+'/'+pids.length+'명 이동');
+  tip(dz+'(으)로 '+done+'명 함께 이동');
 }
 /* 클릭: 선택 → 배정/이동 */
 document.addEventListener('click',e=>{
@@ -691,29 +685,24 @@ $('#btnTpl').onclick=()=>{
 $('#btnAuto').onclick=()=>{
   if(!A.roster.length){tip('먼저 명단을 업로드하세요');return;}
   pushUndo();
-  /* 자유석 오배치 정리: 팀 블록이 있는 구역을 지정받았는데 자유석에 앉은 인원은
-     확인 후 해제하고 블록으로 재배정 — 자유석 구역을 지정받은 인원(스태프 등)은 건드리지 않음 */
-  const mis=[];
+  const allowFree=$('#okFree').checked;
+  /* 규칙에 어긋난 기존 배정 회수: 다른 팀 블록 점유(항상), 자유석 점유(자유석 금지일 때) */
+  let recall=0; const seats1={};
   for(const pid in A.seats){
-    const key=A.seats[pid]; if(M.owner[key])continue;
-    const p=byId(pid); if(!p||!p.team)continue;
-    const zs=AssignCore.prefZoneIds(M,p);
-    const hasBlk=zs.some(z=>{const zn=M.byZone[z];
-      return zn&&zn.seats.some(s=>{const o=M.owner[s.key];return o&&AssignCore.teamMatchesBlock(p.team,o);});});
-    if(hasBlk)mis.push(pid);
+    const p=byId(pid); if(!p) continue;
+    const key=A.seats[pid], own=M.owner[key];
+    const bad=(own && !AssignCore.teamMatchesBlock(p.team,own)) || (!own && !allowFree);
+    if(bad){recall++;continue;}
+    seats1[pid]=key;
   }
-  if(mis.length&&confirm('자유석에 앉아 있는 '+mis.length+'명은 팀 블록이 있는 구역을 지정받은 인원입니다.\n해제하고 팀 블록으로 다시 배정할까요?\n\n(블록 자리가 부족하면 미배정으로 남습니다 · [취소]하면 지금 자리 그대로 둡니다)')){
-    mis.forEach(id=>{delete A.seats[id];});
-  }
-  const {seatOf,warnings}=AssignCore.autoAssign(M,A.roster,A.order,A.seats,{allowFree:$('#okFree').checked});
+  const {seatOf,warnings}=AssignCore.autoAssign(M,A.roster,A.order,seats1,{allowFree});
   A.seats=seatOf; save(); renderAll();
+  const notes=warnings.slice();
+  if(recall) notes.unshift('블록 규칙에 어긋난 기존 배정 '+recall+'건을 회수해 다시 배정했습니다'+(allowFree?'':' (자유석 금지)'));
   const wb=$('#warnbox');
-  if(warnings.length){
-    const cnt={},ord=[]; warnings.forEach(w=>{if(cnt[w]==null){cnt[w]=0;ord.push(w);}cnt[w]++;});
-    wb.style.display='block';wb.textContent='⚠ '+ord.map(w=>w+(cnt[w]>1?'  ×'+cnt[w]:'')).join('\n⚠ ');
-  }
+  if(notes.length){wb.style.display='block';wb.textContent='⚠ '+notes.join('\n⚠ ');}
   else{wb.style.display='none';}
-  tip('자동 배정 완료 — 미배정 '+A.order.filter(id=>!A.seats[id]).length+'명');
+  tip('자동 배정 완료 — 미배정 '+A.order.filter(id=>!A.seats[id]).length+'명'+(recall?' · 회수 '+recall+'건':''));
 };
 $('#btnClr').onclick=()=>{ if(!confirm('모든 배정을 해제할까요? (명단은 유지)'))return; pushUndo(); A.seats={};save();renderAll(); };
 function assignedRows(){
