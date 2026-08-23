@@ -165,8 +165,8 @@ a.lnk{color:var(--mute);font-size:12.5px;text-decoration:none;border:1px solid v
 
 <div id="editbox"></div>
 <div id="tip"></div>
-<script src="assets/xlsx.full.min.js?v=260823p"></script>
-<script src="assets/assign-core.js?v=260823p"></script>
+<script src="assets/xlsx.full.min.js?v=260823q"></script>
+<script src="assets/assign-core.js?v=260823q"></script>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -363,16 +363,19 @@ function renderBlk(){
   const tot={},used={};
   for(const k in M.owner) tot[M.owner[k]]=(tot[M.owner[k]]||0)+1;
   for(const pid in A.seats){const own=M.owner[A.seats[pid]]; if(own)used[own]=(used[own]||0)+1;}
-  let freeT=0,freeU=0;
+  let freeT=0,freeU=0,yT=0,yU=0;
   for(const k in M.seatsByKey){const st=M.seatsByKey[k];
-    if((st.b==='o'||st.b==='y')&&!M.owner[k]){freeT++; if(pidOnSeat[k])freeU++;}}
+    if(M.owner[k])continue;
+    if(st.b==='y'){yT++; if(pidOnSeat[k])yU++;}
+    else if(st.b==='o'){freeT++; if(pidOnSeat[k])freeU++;}}
   const order=(VENJC.teams||[]).map(t=>t.name).filter(n=>tot[n]);
   Object.keys(tot).forEach(n=>{if(order.indexOf(n)<0)order.push(n);});
   $('#blkstats').innerHTML=order.map(n=>{
     const u=used[n]||0,t=tot[n];
     return '<span class="bk"><i style="background:'+(teamCol[n]||'#889')+'"></i>'+esc(n)
       +' <b>'+u+'</b>/'+t+' · <span class="rm">남음 '+(t-u)+'</span></span>';
-  }).join('')+'<span class="bk"><i style="background:#5C6B79"></i>자유석 <b>'+freeU+'</b>/'+freeT+' · <span class="rm">남음 '+(freeT-freeU)+'</span></span>';
+  }).join('')+'<span class="bk"><i style="background:#F2C744"></i>시야제한석 <b>'+yU+'</b>/'+yT+' · <span class="rm">남음 '+(yT-yU)+'</span></span>'
+    +'<span class="bk"><i style="background:#5C6B79"></i>자유석 <b>'+freeU+'</b>/'+freeT+' · <span class="rm">남음 '+(freeT-freeU)+'</span></span>';
 }
 /* 아래 전체 코트 지도(미니맵): 구역 클릭으로 이동, 채움 정도 표시 */
 function renderMini(){
@@ -690,8 +693,10 @@ $('#btnAuto').onclick=()=>{
   let recall=0; const seats1={};
   for(const pid in A.seats){
     const p=byId(pid); if(!p) continue;
-    const key=A.seats[pid], own=M.owner[key];
-    const bad=(own && !AssignCore.teamMatchesBlock(p.team,own)) || (!own && !allowFree);
+    const key=A.seats[pid], own=M.owner[key], st=M.seatsByKey[key];
+    const bad=(own && !AssignCore.teamMatchesBlock(p.team,own))
+           || (p.okY && st && st.b!=='y')                 /* 시야OK는 무조건 시야제한석 */
+           || (!p.okY && !own && !allowFree);
     if(bad){recall++;continue;}
     seats1[pid]=key;
   }
