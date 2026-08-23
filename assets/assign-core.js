@@ -187,7 +187,7 @@ function autoAssign(model, roster, order, seats0, opts){
     for (const rn of runs){ for (const x of rn){ if (out.length < need) out.push(x); } if (out.length >= need) break; }
     return out.length >= need ? out : null;
   }
-  groups.forEach(g => {
+  function prepGroup(g){
     const rep0 = g.members[0];
     const need = g.members.length;
     const zids = prefZoneIds(model, rep0);
@@ -195,46 +195,69 @@ function autoAssign(model, roster, order, seats0, opts){
     const allOkY = g.members.every(m => m.okY);
     const gp = Object.assign({}, rep0, { okY: allOkY });
     const gLabel = (rep0.team || '팀없음') + (rep0.rep ? ' ' + rep0.rep : '') + (rep0.zones.length ? ' [' + rep0.zones.join(',') + ']' : '');
-    /* 구역 목록에서 '그룹 전원이 한 구역에' 들어가는 첫 구역을 찾아 통째 배치 */
-    const tryZones = (zoneList, strict) => {
-      for (const zid of zoneList){
-        const zone = model.byZone[zid]; if (!zone) continue;
-        const all = zone.seats.filter(x => seatAllowed(model, gp, x, taken, strict));
-        let pick = null;
-        if (allOkY){                                     /* 시야제한 OK 인원은 시야제한석 위주로 먼저 */
-          const ySet = new Set(all.filter(x => x.b === 'y').map(x => x.key));
-          pick = pickInZone(zone, ySet, need);
-        }
-        if (!pick) pick = pickInZone(zone, new Set(all.map(x => x.key)), need);
-        if (pick) return { zid, pick };
+    return { g, rep0, need, zids, teamBlock, allOkY, gp, gLabel };
+  }
+  function tryZones(ctx, zoneList, strict){
+    for (const zid of zoneList){
+      const zone = model.byZone[zid]; if (!zone) continue;
+      const all = zone.seats.filter(x => seatAllowed(model, ctx.gp, x, taken, strict));
+      let pick = null;
+      if (ctx.allOkY){                                  /* 시야제한 OK 인원은 시야제한석 위주 */
+        const ySet = new Set(all.filter(x => x.b === 'y').map(x => x.key));
+        pick = pickInZone(zone, ySet, ctx.need);
       }
-      return null;
-    };
+      if (!pick) pick = pickInZone(zone, new Set(all.map(x => x.key)), ctx.need);
+      if (pick) return { zid, pick };
+    }
+    return null;
+  }
+  function commit(ctx, hit){
+    hit.pick.forEach((x, i) => { const m = ctx.g.members[i]; seatOf[m.id] = x.key; taken[x.key] = m.id; });
+  }
+  /* ── 1단계: 모든 그룹을 자기 지정 구역에 먼저 확정 (다른 구역 초과분이 지정자 자리를 뺏지 못하도록) ── */
+  const carry = [];
+  groups.map(prepGroup).forEach(ctx => {
     let hit = null;
-    if (teamBlock) hit = tryZones(zids, true);
-    if (!hit && allowFree) hit = tryZones(zids, false);
-    if (!hit && teamBlock && !pin){
-      /* 지정 구역에 못 앉으면: 팀 블록이 있는 다른 구역 중 '남은 자리가 가장 딱 맞는' 구역으로 통째 이동 */
-      const extra = teamBlockZones(model, rep0.team).filter(z => zids.indexOf(z) < 0);
+    if (ctx.teamBlock) hit = tryZones(ctx, ctx.zids, true);
+    if (!hit && allowFree) hit = tryZones(ctx, ctx.zids, false);
+    if (hit) commit(ctx, hit);
+    else carry.push(ctx);
+  });
+  /* ── 2단계: 지정 구역에 못 들어간 그룹만, 그러고도 남은 자리로 통째 이월 ── */
+  carry.forEach(ctx => {
+    if (!pin && ctx.teamBlock){
+      const extra = teamBlockZones(model, ctx.rep0.team).filter(z => ctx.zids.indexOf(z) < 0);
       const scored = extra.map(zid => {
         const zone = model.byZone[zid]; if (!zone) return null;
-        const cnt = zone.seats.filter(x => seatAllowed(model, gp, x, taken, true)).length;
-        return cnt >= need ? { zid, cnt } : null;
-      }).filter(Boolean).sort((a, b) => a.cnt - b.cnt);
-      hit = tryZones(scored.map(x => x.zid), true);
-      if (hit) warnings.push('구역 변경: ' + gLabel + ' ' + need + '명 — 지정 구역에 자리가 없어 ' + hit.zid + ' 구역으로 함께 이동');
+        const cnt = zone.seats.filter(x => seatAllowed(model, ctx.gp, x, taken, true)).length;
+        return cnt >= ctx.need ? { zid, cnt } : null;
+      }).filter(Boolean).sort((a, b) => b.cnt - a.cnt);      /* 남은 자리 많은 구역부터 (VIP열 등 작은 구역 보존) */
+      const hit = tryZones(ctx, scored.map(x => x.zid), true);
+      if (hit){
+        warnings.push('구역 변경: ' + ctx.gLabel + ' ' + ctx.need + '명 — 지정 구역이 가득 차 ' + hit.zid + ' 구역으로 함께 이동');
+        commit(ctx, hit); return;
+      }
     }
-    if (!hit && allowFree && !pin)
-      hit = tryZones(prefZoneIds(model, Object.assign({}, rep0, { zones: [] })), false);
-    if (!hit){
-      if (!teamBlock && !allowFree)
-        warnings.push('미배정 ' + need + '명: ' + gLabel + ' — 대분류 "' + (rep0.team || '(빈칸)') + '"에 해당하는 지정블록이 없습니다 (자유석 배정 금지 상태)');
-      else
-        warnings.push('미배정 ' + need + '명: ' + gLabel + ' — 한 구역에 붙여 앉을 자리가 없어 전원 미배정');
-      return;
+    if (!pin && allowFree){
+      const hit = tryZones(ctx, prefZoneIds(model, Object.assign({}, ctx.rep0, { zones: [] })), false);
+      if (hit){ commit(ctx, hit); return; }
     }
-    hit.pick.forEach((x, i) => { const m = g.members[i]; seatOf[m.id] = x.key; taken[x.key] = m.id; });
+    if (!ctx.teamBlock && !allowFree)
+      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 대분류 "' + (ctx.rep0.team || '(빈칸)') + '"에 해당하는 지정블록이 없습니다 (자유석 배정 금지 상태)');
+    else
+      warnings.push('미배정 ' + ctx.need + '명: ' + ctx.gLabel + ' — 한 구역에 붙여 앉을 자리가 없어 전원 미배정');
   });
+  /* 정원 초과 안내: 팀 명단이 블록 총 좌석보다 많으면 맨 위에 요약 */
+  if (!allowFree){
+    const teamCnt = {}, teamAll = {};
+    roster.forEach(p => { if (p.team && hasTeamBlock(model, p.team)) teamCnt[p.team] = (teamCnt[p.team] || 0) + 1; });
+    for (const k in model.owner){ const t = model.owner[k];
+      for (const team in teamCnt){ if (teamMatchesBlock(team, t)) teamAll[team] = (teamAll[team] || 0) + 1; } }
+    for (const team in teamCnt){
+      if (teamCnt[team] > (teamAll[team] || 0))
+        warnings.unshift('정원 초과: ' + team + ' 명단 ' + teamCnt[team] + '명 / 지정블록 ' + (teamAll[team] || 0) + '석 — ' + (teamCnt[team] - teamAll[team]) + '명은 블록 어디에도 자리가 없습니다');
+    }
+  }
   /* 같은 경고 합치기 */
   const cnt = {}; warnings.forEach(w => cnt[w] = (cnt[w] || 0) + 1);
   warnings.length = 0;
